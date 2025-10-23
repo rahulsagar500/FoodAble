@@ -7,16 +7,31 @@ export default function Restaurants() {
   const [restaurants, setRestaurants] = useState([]);
   const [offers, setOffers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     let mounted = true;
-    Promise.all([listRestaurants(), listOffers()]).then(([rs, os]) => {
-      if (!mounted) return;
-      setRestaurants(rs);
-      setOffers(os);
-      setLoading(false);
-    });
-    return () => { mounted = false; };
+    setLoading(true);
+    setError("");
+
+    Promise.all([listRestaurants(), listOffers()])
+      .then(([rs, os]) => {
+        if (!mounted) return;
+        setRestaurants(rs);
+        setOffers(os);
+      })
+      .catch((e) => {
+        if (!mounted) return;
+        setError(e?.message || "Failed to load restaurants");
+      })
+      .finally(() => {
+        if (!mounted) return;
+        setLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const offersByRestaurant = useMemo(() => {
@@ -39,6 +54,16 @@ export default function Restaurants() {
   }
 
   if (loading) return <div className="container my-5 text-muted">Loading restaurants…</div>;
+  if (error) {
+    return (
+      <div className="container my-5">
+        <div className="alert alert-danger">{error}</div>
+        <div className="text-muted small">
+          Tip: make sure the API is running on <code>http://localhost:4000</code>.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="container py-4">

@@ -19,12 +19,27 @@ export default function RestaurantPortal() {
   });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    listRestaurants().then((rs) => {
-      setRestaurants(rs);
-      if (rs[0]) setForm((f) => ({ ...f, restaurantId: rs[0].id }));
-    });
+    let mounted = true;
+    setLoading(true);
+    setError("");
+    listRestaurants()
+      .then((rs) => {
+        if (!mounted) return;
+        setRestaurants(rs);
+        if (rs[0]) setForm((f) => ({ ...f, restaurantId: rs[0].id }));
+      })
+      .catch((e) => {
+        if (!mounted) return;
+        setError(e?.message || "Failed to load restaurants");
+      })
+      .finally(() => {
+        if (!mounted) return;
+        setLoading(false);
+      });
+    return () => { mounted = false; };
   }, []);
 
   function onChange(e) {
@@ -40,16 +55,21 @@ export default function RestaurantPortal() {
       const created = await createOffer(form);
       nav(`/restaurants/${created.restaurantId}`);
     } catch (err) {
-      setError(err.message || "Could not create offer");
+      setError(err?.response?.data?.error || err?.message || "Could not create offer");
     } finally {
       setSaving(false);
     }
   }
 
+  if (loading) return <div className="container my-4">Loading…</div>;
+  if (error && restaurants.length === 0) {
+    return <div className="container my-4"><div className="alert alert-danger">{error}</div></div>;
+  }
+
   return (
     <div className="container my-4" style={{ maxWidth: 720 }}>
       <h1 className="h4 mb-3">Restaurant Portal — Create Offer</h1>
-      {error && <div className="alert alert-danger">{error}</div>}
+      {error && <div className="alert alert-warning">{error}</div>}
       <form onSubmit={onSubmit} className="card p-3 shadow-sm">
         <div className="mb-3">
           <label className="form-label">Restaurant</label>
@@ -64,12 +84,10 @@ export default function RestaurantPortal() {
             ))}
           </select>
         </div>
-
         <div className="mb-3">
           <label className="form-label">Title</label>
           <input className="form-control" name="title" value={form.title} onChange={onChange} required />
         </div>
-
         <div className="row">
           <div className="col-md-4 mb-3">
             <label className="form-label">Type</label>
@@ -88,7 +106,6 @@ export default function RestaurantPortal() {
             <input className="form-control" name="originalPrice" value={form.originalPrice} onChange={onChange} required />
           </div>
         </div>
-
         <div className="row">
           <div className="col-md-4 mb-3">
             <label className="form-label">Quantity</label>
@@ -103,14 +120,12 @@ export default function RestaurantPortal() {
             <input className="form-control" name="pickupEnd" value={form.pickupEnd} onChange={onChange} />
           </div>
         </div>
-
         <div className="mb-3">
           <label className="form-label">Photo URL (optional)</label>
           <input className="form-control" name="photoUrl" value={form.photoUrl} onChange={onChange} placeholder="https://…" />
           <div className="form-text">Leave blank to reuse the restaurant’s hero image.</div>
         </div>
-
-        <button className="btn btn-dark" disabled={saving}>
+        <button className="btn btn-dark" disabled={saving || !form.restaurantId}>
           {saving ? "Saving…" : "Create Offer"}
         </button>
       </form>
