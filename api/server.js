@@ -1,9 +1,12 @@
-// server.js (DB-backed)
+// server.js (DB + Google OAuth + JWT cookie)
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const { PrismaClient } = require("@prisma/client");
+const passport = require("passport");
+const GoogleStrategy = require("passport-google-oauth20").Strategy;
+const jwt = require("jsonwebtoken");
 
 const prisma = new PrismaClient();
 const app = express();
@@ -17,8 +20,117 @@ app.use(
 );
 app.use(express.json());
 app.use(cookieParser());
+app.use(passport.initialize());
 
-// Helpers
+// ---------- Auth helpers ----------
+const COOKIE_NAME = "token";
+const COOKIE_OPTIONS = {
+  httpOnly: true,
+  sameSite: "lax",
+  // secure: true, // enable when using https
+  path: "/",
+};
+
+function signToken(payload) {
+  return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: "7d" });
+}
+
+function requireAuth(req, res, next) {
+  const token = req.cookies[COOKIE_NAME];
+  if (!token) return res.status(401).json({ error: "unauthorized" });
+  try {
+    const data = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = data;
+    next();
+  } catch {
+    return res.status(401).json({ error: "unauthorized" });
+  }
+}
+
+// ---------- Passport (Google) ----------
+passport.use(
+  new GoogleStrategy(
+    {
+      clientID: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      callbackURL: process.env.GOOGLE_CALLBACK_URL,
+    },
+    async (_accessToken, _refreshToken, profile, done) => {
+      try {
+        const email = profile.emails?.[0]?.value;
+        const avatarUrl = profile.photos?.[0]?.value;
+        const name = profile.displayName;
+
+        // upsert user
+        const user = await prisma.user.upsert({
+          where: { googleId: profile.id },
+          update: { email, name, avatarUrl },
+          create: {
+            googleId: profile.id,
+            email,
+            name,
+            avatarUrl,
+            role: "customer",
+          },
+        });
+        done(null, { id: user.id, email: user.email, role: user.role, name: user.name, avatarUrl: user.avatarUrl });
+      } catch (e) {
+        done(e);
+      }
+    }
+  )
+);
+
+// ---------- Health ----------
+app.get("/api/health", async (req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ ok: true });
+  } catch {
+    res.status(500).json({ ok: false, error: "db_unavailable" });
+  }
+});
+
+// ---------- Auth routes ----------
+app.get("/api/auth/google", passport.authenticate("google", { scope: ["openid", "email", "profile"] }));
+
+app.get(
+  "/api/auth/google/callback",
+  passport.authenticate("google", { session: false, failureRedirect: "http://localhost:5173" }),
+  async (req, res) => {
+    // req.user was set in the strategy's done()
+    const token = signToken({
+      uid: req.user.id,
+      email: req.user.email,
+      role: req.user.role,
+      name: req.user.name,
+      avatarUrl: req.user.avatarUrl,
+    });
+    res.cookie(COOKIE_NAME, token, { ...COOKIE_OPTIONS, maxAge: 7 * 24 * 60 * 60 * 1000 });
+    res.redirect("http://localhost:5173"); // back to app
+  }
+);
+
+app.get("/api/auth/me", async (req, res) => {
+  const token = req.cookies[COOKIE_NAME];
+  if (!token) return res.json(null);
+  try {
+    const data = jwt.verify(token, process.env.JWT_SECRET);
+    // fetch fresh role/name in case they changed
+    const user = await prisma.user.findUnique({ where: { id: data.uid } });
+    if (!user) return res.json(null);
+    res.json({ id: user.id, email: user.email, role: user.role, name: user.name, avatarUrl: user.avatarUrl });
+  } catch {
+    res.json(null);
+  }
+});
+
+app.post("/api/auth/logout", (req, res) => {
+  res.clearCookie(COOKIE_NAME, COOKIE_OPTIONS);
+  res.json({ ok: true });
+});
+
+// ---------- Helpers to map DB offers to API shape ----------
 const mapOffer = (o) => ({
   id: o.id,
   restaurantId: o.restaurantId,
@@ -33,17 +145,7 @@ const mapOffer = (o) => ({
   photoUrl: o.photoUrl,
 });
 
-// Health
-app.get("/api/health", async (req, res) => {
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: "db_unavailable" });
-  }
-});
-
-// Restaurants
+// ---------- Restaurants ----------
 app.get("/api/restaurants", async (req, res, next) => {
   try {
     const rs = await prisma.restaurant.findMany({ orderBy: { name: "asc" } });
@@ -77,7 +179,7 @@ app.get("/api/restaurants/:id/offers", async (req, res, next) => {
   }
 });
 
-// Offers
+// ---------- Offers ----------
 app.get("/api/offers", async (req, res, next) => {
   try {
     const os = await prisma.offer.findMany({
@@ -103,7 +205,7 @@ app.get("/api/offers/:id", async (req, res, next) => {
   }
 });
 
-app.post("/api/offers", async (req, res, next) => {
+app.post("/api/offers", requireAuth, async (req, res, next) => {
   try {
     const {
       restaurantId,
@@ -176,7 +278,7 @@ app.post("/api/offers/:id/reserve", async (req, res, next) => {
   }
 });
 
-// Error handler
+// ---------- Errors ----------
 app.use((err, req, res, _next) => {
   console.error(err);
   res.status(500).json({ error: "internal_error" });
