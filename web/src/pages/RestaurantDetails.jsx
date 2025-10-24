@@ -1,22 +1,22 @@
 import React, { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getRestaurant } from "../api/restaurants";
-import { listOffersByRestaurant, formatPrice } from "../api/offers";
+import { listOffersByRestaurant } from "../api/offers";
+import { useCart } from "../cart/CartContext.jsx";
+import { formatPrice } from "../lib/format";
 
 export default function RestaurantDetails() {
   const { id } = useParams();
   const [rest, setRest] = useState(null);
   const [offers, setOffers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const { add } = useCart();
 
   useEffect(() => {
     let mounted = true;
-    Promise.all([getRestaurant(id), listOffersByRestaurant(id)]).then(([r, os]) => {
-      if (!mounted) return;
-      setRest(r);
-      setOffers(os);
-      setLoading(false);
-    }).catch(() => setLoading(false));
+    Promise.all([getRestaurant(id), listOffersByRestaurant(id)])
+      .then(([r, os]) => { if (mounted) { setRest(r); setOffers(os); setLoading(false); }})
+      .catch(() => setLoading(false));
     return () => { mounted = false; };
   }, [id]);
 
@@ -43,7 +43,7 @@ export default function RestaurantDetails() {
       </div>
 
       <div className="container my-4">
-        <Link to="/restaurants" className="btn btn-link">&larr; All restaurants</Link>
+        <Link to="/" className="btn btn-link">&larr; All restaurants</Link>
 
         <div className="row g-3 mt-2">
           {offers.map((o) => {
@@ -72,7 +72,24 @@ export default function RestaurantDetails() {
                       <span className={`badge ${sold ? "bg-danger" : "bg-primary"}`}>
                         {sold ? "Sold out" : `${o.qty} left`}
                       </span>
-                      <Link to={`/offers/${o.id}`} className="btn btn-dark">View</Link>
+                      <div className="d-flex gap-2">
+                        <Link to={`/offers/${o.id}`} className="btn btn-outline-secondary">View</Link>
+                        <button
+                          className="btn btn-dark"
+                          disabled={sold}
+                          onClick={() =>
+                            add({
+                              id: o.id,
+                              title: o.title,
+                              restaurant: rest.name,
+                              priceCents: o.priceCents,
+                              photoUrl: o.photoUrl,
+                            }, 1)
+                          }
+                        >
+                          Add to cart
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>

@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { getOffer, reserveOffer, formatPrice } from "../api/offers";
+import { getOffer, reserveOffer } from "../api/offers";
+import { useCart } from "../cart/CartContext.jsx";
+import { formatPrice } from "../lib/format";
 
 export default function OfferDetails() {
   const { id } = useParams();
@@ -9,6 +11,8 @@ export default function OfferDetails() {
   const [error, setError] = useState(null);
   const [reserving, setReserving] = useState(false);
   const [order, setOrder] = useState(null);
+
+  const { add } = useCart();
 
   useEffect(() => {
     let mounted = true;
@@ -27,10 +31,24 @@ export default function OfferDetails() {
       setOrder(result);
       setOffer((prev) => (prev ? { ...prev, qty: Math.max(0, prev.qty - 1) } : prev));
     } catch (e) {
-      setError(e.message || "Could not reserve");
+      setError(e?.response?.data?.error || e.message || "Could not reserve");
     } finally {
       setReserving(false);
     }
+  }
+
+  function onAddToCart() {
+    if (!offer || offer.qty <= 0) return;
+    add(
+      {
+        id: offer.id,
+        title: offer.title,
+        restaurant: offer.restaurant,
+        priceCents: offer.priceCents,
+        photoUrl: offer.photoUrl,
+      },
+      1
+    );
   }
 
   if (loading) return <div className="container my-5 text-muted">Loading…</div>;
@@ -84,7 +102,7 @@ export default function OfferDetails() {
               <div>
                 Reserved! Order ID: <strong>{order.orderId}</strong>. Show this at pickup.
               </div>
-              <Link to="/" className="btn btn-sm btn-success">Go to Explore</Link>
+              <Link to="/" className="btn btn-sm btn-success">Go to Restaurants</Link>
             </div>
           )}
           {error && <div className="alert alert-danger">{error}</div>}
@@ -93,6 +111,13 @@ export default function OfferDetails() {
             <span className={`badge ${offer.qty > 0 ? "bg-primary" : "bg-danger"}`}>
               {offer.qty > 0 ? `${offer.qty} left` : "Sold out"}
             </span>
+            <button
+              className="btn btn-outline-dark"
+              disabled={offer.qty <= 0 || !!order}
+              onClick={onAddToCart}
+            >
+              Add to cart
+            </button>
             <button
               className="btn btn-dark"
               disabled={offer.qty <= 0 || reserving || !!order}
@@ -104,7 +129,7 @@ export default function OfferDetails() {
                   Reserving…
                 </>
               ) : (
-                "Reserve"
+                "Reserve now"
               )}
             </button>
           </div>
