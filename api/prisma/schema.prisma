@@ -1,0 +1,55 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+
+enum OfferType {
+  discount
+  mystery
+  donation
+}
+
+model Restaurant {
+  id        String   @id @default(cuid())
+  name      String
+  area      String?
+  heroUrl   String
+  offers    Offer[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Offer {
+  id                 String     @id @default(cuid())
+  restaurantId       String
+  restaurant         Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  title              String
+  type               OfferType  @default(discount)
+  priceCents         Int
+  originalPriceCents Int
+  distanceKm         Float      @default(1.0)
+  pickupStart        String
+  pickupEnd          String
+  qty                Int        @default(0)
+  photoUrl           String?
+  orders             Order[]
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  @@index([restaurantId])
+}
+
+model Order {
+  id        String   @id @default(cuid())
+  offerId   String
+  offer     Offer    @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  status    String   @default("reserved")
+  createdAt DateTime @default(now())
+
+  @@index([offerId])
+}

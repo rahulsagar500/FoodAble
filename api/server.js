@@ -1,166 +1,185 @@
-// server.js
+// server.js (DB-backed)
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
+const { PrismaClient } = require("@prisma/client");
 
+const prisma = new PrismaClient();
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-app.use(cors({
-  origin: ["http://localhost:5173", "http://localhost:5174"],
-  credentials: true
-}));
-
+app.use(
+  cors({
+    origin: ["http://localhost:5173", "http://localhost:5174"],
+    credentials: true,
+  })
+);
 app.use(express.json());
 app.use(cookieParser());
 
-// --- Seed data ---
-const restaurants = [
-  {
-    id: "r1",
-    name: "Tokyo Bites",
-    area: "Woolloongabba",
-    heroUrl:
-      "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?q=80&w=1600&auto=format&fit=crop",
-  },
-  {
-    id: "r2",
-    name: "Crust & Crumb",
-    area: "West End",
-    heroUrl:
-      "https://images.unsplash.com/photo-1541592106381-b31e9677c0e5?q=80&w=1600&auto=format&fit=crop",
-  },
-  {
-    id: "r3",
-    name: "Nonna’s",
-    area: "Fortitude Valley",
-    heroUrl:
-      "https://images.unsplash.com/photo-1525755662778-989d0524087e?q=80&w=1600&auto=format&fit=crop",
-  },
-];
-
-const offers = [
-  {
-    id: "1",
-    restaurantId: "r1",
-    restaurant: "Tokyo Bites",
-    title: "Sushi Rescue Box",
-    priceCents: 800,
-    originalPriceCents: 2200,
-    distanceKm: 1.2,
-    pickup: { start: "17:30", end: "19:00" },
-    qty: 3,
-    type: "mystery",
-    photoUrl:
-      "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?q=80&w=1200&auto=format&fit=crop",
-  },
-  {
-    id: "2",
-    restaurantId: "r2",
-    restaurant: "Crust & Crumb",
-    title: "Bakery Mixed Bag",
-    priceCents: 500,
-    originalPriceCents: 1600,
-    distanceKm: 0.7,
-    pickup: { start: "16:00", end: "18:00" },
-    qty: 0,
-    type: "donation",
-    photoUrl:
-      "https://images.unsplash.com/photo-1541592106381-b31e9677c0e5?q=80&w=1200&auto=format&fit=crop",
-  },
-  {
-    id: "3",
-    restaurantId: "r3",
-    restaurant: "Nonna’s",
-    title: "Pasta Family Pack",
-    priceCents: 900,
-    originalPriceCents: 2400,
-    distanceKm: 2.4,
-    pickup: { start: "19:15", end: "20:00" },
-    qty: 5,
-    type: "discount",
-    photoUrl:
-      "https://images.unsplash.com/photo-1525755662778-989d0524087e?q=80&w=1200&auto=format&fit=crop",
-  },
-];
-
-// --- Health ---
-app.get("/api/health", (req, res) => res.json({ ok: true }));
-
-// --- Restaurants ---
-app.get("/api/restaurants", (req, res) => res.json(restaurants));
-
-app.get("/api/restaurants/:id", (req, res) => {
-  const r = restaurants.find((x) => x.id === String(req.params.id));
-  if (!r) return res.status(404).json({ error: "Restaurant not found" });
-  res.json(r);
+// Helpers
+const mapOffer = (o) => ({
+  id: o.id,
+  restaurantId: o.restaurantId,
+  restaurant: o.restaurant ? o.restaurant.name : undefined,
+  title: o.title,
+  type: o.type,
+  priceCents: o.priceCents,
+  originalPriceCents: o.originalPriceCents,
+  distanceKm: o.distanceKm,
+  pickup: { start: o.pickupStart, end: o.pickupEnd },
+  qty: o.qty,
+  photoUrl: o.photoUrl,
 });
 
-app.get("/api/restaurants/:id/offers", (req, res) => {
-  const id = String(req.params.id);
-  res.json(offers.filter((o) => o.restaurantId === id));
-});
-
-// --- Offers ---
-app.get("/api/offers", (req, res) => res.json(offers));
-
-app.get("/api/offers/:id", (req, res) => {
-  const o = offers.find((x) => x.id === String(req.params.id));
-  if (!o) return res.status(404).json({ error: "Offer not found" });
-  res.json(o);
-});
-
-app.post("/api/offers", (req, res) => {
-  const {
-    restaurantId,
-    title,
-    type = "discount",
-    price,
-    originalPrice,
-    qty = 0,
-    pickupStart = "17:00",
-    pickupEnd = "19:00",
-    photoUrl,
-  } = req.body || {};
-
-  const rest = restaurants.find((r) => r.id === String(restaurantId));
-  if (!rest) return res.status(400).json({ error: "Invalid restaurantId" });
-
-  const priceCents = Math.round(Number(price) * 100);
-  const origCents = Math.round(Number(originalPrice) * 100);
-  if (!Number.isFinite(priceCents) || !Number.isFinite(origCents)) {
-    return res.status(400).json({ error: "Invalid prices" });
+// Health
+app.get("/api/health", async (req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: "db_unavailable" });
   }
-
-  const newOffer = {
-    id: String(Date.now()),
-    restaurantId: rest.id,
-    restaurant: rest.name,
-    title: String(title || "").trim(),
-    type,
-    priceCents,
-    originalPriceCents: origCents,
-    distanceKm: 1.0,
-    pickup: { start: pickupStart, end: pickupEnd },
-    qty: Math.max(0, parseInt(qty, 10) || 0),
-    photoUrl: photoUrl || rest.heroUrl,
-  };
-
-  offers.push(newOffer);
-  res.status(201).json(newOffer);
 });
 
-app.post("/api/offers/:id/reserve", (req, res) => {
-  const idx = offers.findIndex((o) => o.id === String(req.params.id));
-  if (idx === -1) return res.status(404).json({ error: "Offer not found" });
-  if (offers[idx].qty <= 0) return res.status(409).json({ error: "Sold out" });
+// Restaurants
+app.get("/api/restaurants", async (req, res, next) => {
+  try {
+    const rs = await prisma.restaurant.findMany({ orderBy: { name: "asc" } });
+    res.json(rs);
+  } catch (e) {
+    next(e);
+  }
+});
 
-  offers[idx].qty -= 1;
-  res.json({
-    orderId: `${Date.now()}-${Math.floor(Math.random() * 100000)}`,
-    offerId: String(req.params.id),
-  });
+app.get("/api/restaurants/:id", async (req, res, next) => {
+  try {
+    const r = await prisma.restaurant.findUnique({ where: { id: String(req.params.id) } });
+    if (!r) return res.status(404).json({ error: "Restaurant not found" });
+    res.json(r);
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.get("/api/restaurants/:id/offers", async (req, res, next) => {
+  try {
+    const id = String(req.params.id);
+    const os = await prisma.offer.findMany({
+      where: { restaurantId: id },
+      include: { restaurant: true },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json(os.map(mapOffer));
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Offers
+app.get("/api/offers", async (req, res, next) => {
+  try {
+    const os = await prisma.offer.findMany({
+      include: { restaurant: true },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json(os.map(mapOffer));
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.get("/api/offers/:id", async (req, res, next) => {
+  try {
+    const o = await prisma.offer.findUnique({
+      where: { id: String(req.params.id) },
+      include: { restaurant: true },
+    });
+    if (!o) return res.status(404).json({ error: "Offer not found" });
+    res.json(mapOffer(o));
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.post("/api/offers", async (req, res, next) => {
+  try {
+    const {
+      restaurantId,
+      title,
+      type = "discount",
+      price,
+      originalPrice,
+      qty = 0,
+      pickupStart = "17:00",
+      pickupEnd = "19:00",
+      photoUrl,
+    } = req.body || {};
+
+    // Validate restaurant
+    const rest = await prisma.restaurant.findUnique({ where: { id: String(restaurantId) } });
+    if (!rest) return res.status(400).json({ error: "Invalid restaurantId" });
+
+    const priceCents = Math.round(Number(price) * 100);
+    const origCents = Math.round(Number(originalPrice) * 100);
+    if (!Number.isFinite(priceCents) || !Number.isFinite(origCents)) {
+      return res.status(400).json({ error: "Invalid prices" });
+    }
+
+    const created = await prisma.offer.create({
+      data: {
+        restaurantId: rest.id,
+        title: String(title || "").trim(),
+        type,
+        priceCents,
+        originalPriceCents: origCents,
+        distanceKm: 1.0,
+        pickupStart,
+        pickupEnd,
+        qty: Math.max(0, parseInt(qty, 10) || 0),
+        photoUrl: photoUrl || rest.heroUrl,
+      },
+      include: { restaurant: true },
+    });
+
+    res.status(201).json(mapOffer(created));
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.post("/api/offers/:id/reserve", async (req, res, next) => {
+  const id = String(req.params.id);
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      const offer = await tx.offer.findUnique({ where: { id } });
+      if (!offer) return { status: 404, error: "Offer not found" };
+      if (offer.qty <= 0) return { status: 409, error: "Sold out" };
+
+      await tx.offer.update({
+        where: { id },
+        data: { qty: { decrement: 1 } },
+      });
+
+      const order = await tx.order.create({
+        data: { offerId: id, status: "reserved" },
+      });
+
+      return { status: 200, order };
+    });
+
+    if (result.error) return res.status(result.status).json({ error: result.error });
+    res.json({ orderId: result.order.id, offerId: id });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Error handler
+app.use((err, req, res, _next) => {
+  console.error(err);
+  res.status(500).json({ error: "internal_error" });
 });
 
 app.listen(PORT, () => {
