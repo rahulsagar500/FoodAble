@@ -1,132 +1,69 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { listRestaurants } from "../api/restaurants";
-import { listOffers } from "../api/offers";
+import { listOffers, formatPrice } from "../api/offers";
 
-export default function Restaurants() {
-  // data
-  const [restaurants, setRestaurants] = useState([]);
+export default function Explore() {
   const [offers, setOffers] = useState([]);
-
-  // ui state
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(null);
 
+  // UI state
   const [search, setSearch] = useState("");
   const [nearby, setNearby] = useState(true);
-  const [maxDistance, setMaxDistance] = useState(10); // km
   const [filterTypes, setFilterTypes] = useState({
     mystery: true,
     donation: true,
     discount: true,
   });
-  const [minDiscount, setMinDiscount] = useState(0); // %
-  const [onlyAvailable, setOnlyAvailable] = useState(false); // qty > 0
+  const [maxDistance, setMaxDistance] = useState(10);
 
   useEffect(() => {
     let mounted = true;
-    setLoading(true);
-    setError("");
-
-    Promise.all([listRestaurants(), listOffers()])
-      .then(([rs, os]) => {
-        if (!mounted) return;
-        setRestaurants(rs);
-        setOffers(os);
+    listOffers()
+      .then((data) => {
+        if (mounted) {
+          setOffers(Array.isArray(data) ? data : []);
+          setLoading(false);
+        }
       })
       .catch((e) => {
-        if (!mounted) return;
-        setError(e?.message || "Failed to load restaurants");
-      })
-      .finally(() => {
-        if (!mounted) return;
-        setLoading(false);
+        if (mounted) {
+          setError(e?.message || "Failed to load offers");
+          setLoading(false);
+        }
       });
-
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, []);
 
-  // Build quick indexes from offers
-  const offersByRestaurant = useMemo(() => {
-    const map = new Map();
-    for (const o of offers) {
-      if (!map.has(o.restaurantId)) map.set(o.restaurantId, []);
-      map.get(o.restaurantId).push(o);
-    }
-    return map;
-  }, [offers]);
-
-  function discountPct(o) {
-    return Math.round((1 - o.priceCents / o.originalPriceCents) * 100) || 0;
-  }
-
-  function offerMatches(o) {
-    if (!filterTypes[o.type]) return false;
-    if (onlyAvailable && o.qty <= 0) return false;
-    if (discountPct(o) < minDiscount) return false;
-    if (nearby && o.distanceKm > maxDistance) return false;
-    return true;
-    // photo/type/qty/price handled by card itself
-  }
-
-  // Compute filtered, sorted restaurants with metrics for display
-  const results = useMemo(() => {
+  const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
 
-    return restaurants
-      .map((r) => {
-        const items = offersByRestaurant.get(r.id) || [];
+    const out = (offers || []).filter((o) => {
+      const restName =
+        typeof o.restaurant === "string" ? o.restaurant : (o.restaurant?.name || "");
 
-        // subset of offers that pass filters
-        const eligible = items.filter(offerMatches);
+      const title = (o.title || "").toLowerCase();
+      const matchesQ = !q || title.includes(q) || restName.toLowerCase().includes(q);
 
-        // search by restaurant name/area
-        const searchMatch =
-          !q ||
-          r.name.toLowerCase().includes(q) ||
-          (r.area || "").toLowerCase().includes(q);
+      const matchesType = filterTypes[o.type] ?? true;
 
-        // metrics for sorting/badges
-        let bestDiscount = 0;
-        let closestKm = Number.POSITIVE_INFINITY;
-        for (const o of eligible) {
-          const pct = discountPct(o);
-          if (pct > bestDiscount) bestDiscount = pct;
-          if (o.distanceKm < closestKm) closestKm = o.distanceKm;
-        }
+      const dist = Number.isFinite(o.distanceKm) ? o.distanceKm : Infinity;
+      const matchesDistance = !nearby || dist <= maxDistance;
 
-        return {
-          r,
-          eligibleCount: eligible.length,
-          bestDiscount,
-          closestKm,
-          searchMatch,
-        };
-      })
-      // show only restaurants that match search AND have at least one eligible offer
-      .filter((x) => x.searchMatch && x.eligibleCount > 0)
-      // sort: if Nearby ON → by distance; else → by best discount
-      .sort((a, b) => {
-        if (nearby) {
-          return (a.closestKm || 1e9) - (b.closestKm || 1e9);
-        }
-        return (b.bestDiscount || 0) - (a.bestDiscount || 0);
-      });
-  }, [restaurants, offersByRestaurant, search, filterTypes, onlyAvailable, minDiscount, nearby, maxDistance]);
+      return matchesQ && matchesType && matchesDistance;
+    });
 
-  if (loading) return <div className="container my-5 text-muted">Loading restaurants…</div>;
-  if (error) {
-    return (
-      <div className="container my-5">
-        <div className="alert alert-danger">{error}</div>
-        <div className="text-muted small">
-          Tip: ensure API is running at <code>http://localhost:4000</code>.
-        </div>
-      </div>
-    );
-  }
+    if (nearby) {
+      out.sort((a, b) => (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity));
+    } else {
+      const disc = (x) => 1 - (x.priceCents / x.originalPriceCents);
+      out.sort((a, b) => disc(b) - disc(a));
+    }
+    return out;
+  }, [offers, search, filterTypes, nearby, maxDistance]);
+
+  if (loading) return <div className="container my-5 text-muted">Loading offers…</div>;
+  if (error) return <div className="container my-5"><div className="alert alert-danger">{error}</div></div>;
 
   return (
     <div>
@@ -154,7 +91,7 @@ export default function Restaurants() {
             <input
               type="text"
               className="form-control"
-              placeholder="Search restaurants or areas"
+              placeholder="Search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -187,42 +124,70 @@ export default function Restaurants() {
 
         {/* Display count */}
         <div className="mt-3 text-muted">
-          Displaying <strong>{results.length}</strong> of {restaurants.length} restaurants
+          Displaying <strong>{filtered.length}</strong> of the {offers.length} best restaurants in Brisbane near me
         </div>
 
-        {/* Cards grid */}
-        <div className="row row-cols-1 row-cols-md-2 row-cols-lg-4 g-3 mt-2">
-          {results.map(({ r, eligibleCount, bestDiscount, closestKm }) => (
-            <div className="col" key={r.id}>
-              <div className="card h-100 shadow-sm">
-                <img
-                  src={r.heroUrl}
-                  className="card-img-top"
-                  alt={r.name}
-                  style={{ height: 190, objectFit: "cover" }}
-                />
-                <div className="card-body d-flex flex-column">
-                  <h3 className="h5">{r.name}</h3>
-                  <div className="text-muted small mb-2">{r.area}</div>
+        {/* Cards list */}
+        <div className="mt-3">
+          {filtered.map((o) => {
+            const pct = Math.round((1 - o.priceCents / o.originalPriceCents) * 100) || 0;
+            const sold = (o.qty ?? 0) <= 0;
+            const restName =
+              typeof o.restaurant === "string" ? o.restaurant : (o.restaurant?.name || "");
+            const distText = Number.isFinite(o.distanceKm) ? `${o.distanceKm} km away` : "";
 
-                  <div className="mt-auto d-flex justify-content-between align-items-center">
-                    <span className="badge bg-warning-subtle text-dark border">
-                      {nearby && isFinite(closestKm) ? `${closestKm.toFixed(1)} km` : `↑ ${bestDiscount || 0}% OFF`}
-                    </span>
-                    <Link to={`/restaurants/${r.id}`} className="btn btn-outline-dark">
-                      ➜
-                    </Link>
+            return (
+              <div key={o.id} className="card mb-3">
+                <div className="row g-0 align-items-center">
+                  <div className="col-md-3">
+                    <div className="position-relative">
+                      <img
+                        src={o.photoUrl || "/placeholder.jpg"}
+                        alt={o.title}
+                        className="img-fluid rounded-start"
+                        style={{ height: 160, width: "100%", objectFit: "cover" }}
+                      />
+                      <span className={`badge position-absolute top-0 start-0 m-2 ${sold ? "bg-danger" : "bg-primary"}`}>
+                        {sold ? "Sold out" : `${o.qty} left`}
+                      </span>
+                    </div>
                   </div>
-                  <div className="text-muted small mt-2">{eligibleCount} matching offer(s)</div>
+                  <div className="col-md-9">
+                    <div className="card-body d-flex justify-content-between align-items-start flex-wrap">
+                      <div style={{ minWidth: 240 }}>
+                        <div className="d-flex align-items-center gap-2">
+                          <span className="badge bg-secondary text-uppercase">{o.type}</span>
+                          <h3 className="h5 m-0">{o.title}</h3>
+                        </div>
+                        <div className="text-muted">
+                          {restName}{distText && ` • ${distText}`}
+                        </div>
+                        <div className="mt-2">
+                          <span className="fw-semibold">{formatPrice(o.priceCents)}</span>
+                          <span className="text-muted text-decoration-line-through ms-2">
+                            {formatPrice(o.originalPriceCents)}
+                          </span>
+                          <span className="ms-2 badge bg-success">{pct}% off</span>
+                        </div>
+                        <div className="small text-muted mt-1">
+                          Pickup {o.pickup?.start}–{o.pickup?.end}
+                        </div>
+                      </div>
+                      <div className="mt-3 mt-md-0">
+                        <Link to={`/offers/${o.id}`} className="btn btn-dark">
+                          View
+                        </Link>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
-          {results.length === 0 && (
-            <div className="col-12">
-              <div className="alert alert-light border mt-3">
-                No results. Try clearing filters or increasing distance.
-              </div>
+            );
+          })}
+
+          {filtered.length === 0 && (
+            <div className="alert alert-light border mt-3">
+              No results. Try clearing filters or increasing distance.
             </div>
           )}
         </div>
@@ -245,7 +210,7 @@ export default function Restaurants() {
                       className="form-check-input"
                       type="checkbox"
                       id={`t-${t}`}
-                      checked={filterTypes[t]}
+                      checked={!!filterTypes[t]}
                       onChange={(e) =>
                         setFilterTypes((prev) => ({ ...prev, [t]: e.target.checked }))
                       }
@@ -257,25 +222,9 @@ export default function Restaurants() {
                 ))}
               </div>
 
-              <div className="mb-3">
-                <label htmlFor="discountRange" className="form-label">
-                  Minimum discount: <strong>{minDiscount}%</strong>
-                </label>
-                <input
-                  type="range"
-                  className="form-range"
-                  id="discountRange"
-                  min="0"
-                  max="80"
-                  step="5"
-                  value={minDiscount}
-                  onChange={(e) => setMinDiscount(Number(e.target.value))}
-                />
-              </div>
-
-              <div className="mb-3">
+              <div className="mb-2">
                 <label htmlFor="distanceRange" className="form-label">
-                  Max distance {nearby ? <>(<strong>{maxDistance} km</strong>)</> : "(ignored when Nearby is OFF)"}
+                  Max distance {nearby ? `(${maxDistance} km)` : "(ignored when Nearby is OFF)"}
                 </label>
                 <input
                   type="range"
@@ -286,19 +235,6 @@ export default function Restaurants() {
                   value={maxDistance}
                   onChange={(e) => setMaxDistance(Number(e.target.value))}
                 />
-              </div>
-
-              <div className="form-check mb-1">
-                <input
-                  className="form-check-input"
-                  type="checkbox"
-                  id="availableOnly"
-                  checked={onlyAvailable}
-                  onChange={(e) => setOnlyAvailable(e.target.checked)}
-                />
-                <label className="form-check-label" htmlFor="availableOnly">
-                  Only show offers with availability
-                </label>
               </div>
             </div>
             <div className="modal-footer">

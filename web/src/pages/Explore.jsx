@@ -7,7 +7,7 @@ export default function Explore() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // UI state (like the EatClub page)
+  // UI state
   const [search, setSearch] = useState("");
   const [nearby, setNearby] = useState(true);
   const [filterTypes, setFilterTypes] = useState({
@@ -22,36 +22,41 @@ export default function Explore() {
     listOffers()
       .then((data) => {
         if (mounted) {
-          setOffers(data);
+          setOffers(Array.isArray(data) ? data : []);
           setLoading(false);
         }
       })
       .catch((e) => {
         if (mounted) {
-          setError(e.message || "Failed to load offers");
+          setError(e?.message || "Failed to load offers");
           setLoading(false);
         }
       });
-    return () => (mounted = false);
+    return () => { mounted = false; };
   }, []);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    let out = offers.filter((o) => {
-      const matchesQ =
-        !q ||
-        o.title.toLowerCase().includes(q) ||
-        o.restaurant.toLowerCase().includes(q);
-      const matchesType = filterTypes[o.type];
-      const matchesDistance = !nearby || o.distanceKm <= maxDistance;
+
+    const out = (offers || []).filter((o) => {
+      const restName =
+        typeof o.restaurant === "string" ? o.restaurant : (o.restaurant?.name || "");
+
+      const title = (o.title || "").toLowerCase();
+      const matchesQ = !q || title.includes(q) || restName.toLowerCase().includes(q);
+
+      const matchesType = filterTypes[o.type] ?? true;
+
+      const dist = Number.isFinite(o.distanceKm) ? o.distanceKm : Infinity;
+      const matchesDistance = !nearby || dist <= maxDistance;
+
       return matchesQ && matchesType && matchesDistance;
     });
 
-    // Sort: Nearby ON -> by distance; else by discount %
     if (nearby) {
-      out.sort((a, b) => a.distanceKm - b.distanceKm);
+      out.sort((a, b) => (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity));
     } else {
-      const disc = (o) => 1 - o.priceCents / o.originalPriceCents;
+      const disc = (x) => 1 - (x.priceCents / x.originalPriceCents);
       out.sort((a, b) => disc(b) - disc(a));
     }
     return out;
@@ -126,14 +131,18 @@ export default function Explore() {
         <div className="mt-3">
           {filtered.map((o) => {
             const pct = Math.round((1 - o.priceCents / o.originalPriceCents) * 100) || 0;
-            const sold = o.qty <= 0;
+            const sold = (o.qty ?? 0) <= 0;
+            const restName =
+              typeof o.restaurant === "string" ? o.restaurant : (o.restaurant?.name || "");
+            const distText = Number.isFinite(o.distanceKm) ? `${o.distanceKm} km away` : "";
+
             return (
               <div key={o.id} className="card mb-3">
                 <div className="row g-0 align-items-center">
                   <div className="col-md-3">
                     <div className="position-relative">
                       <img
-                        src={o.photoUrl}
+                        src={o.photoUrl || "/placeholder.jpg"}
                         alt={o.title}
                         className="img-fluid rounded-start"
                         style={{ height: 160, width: "100%", objectFit: "cover" }}
@@ -151,7 +160,7 @@ export default function Explore() {
                           <h3 className="h5 m-0">{o.title}</h3>
                         </div>
                         <div className="text-muted">
-                          {o.restaurant} • {o.distanceKm} km away
+                          {restName}{distText && ` • ${distText}`}
                         </div>
                         <div className="mt-2">
                           <span className="fw-semibold">{formatPrice(o.priceCents)}</span>
@@ -161,7 +170,7 @@ export default function Explore() {
                           <span className="ms-2 badge bg-success">{pct}% off</span>
                         </div>
                         <div className="small text-muted mt-1">
-                          Pickup {o.pickup.start}–{o.pickup.end}
+                          Pickup {o.pickup?.start}–{o.pickup?.end}
                         </div>
                       </div>
                       <div className="mt-3 mt-md-0">
@@ -175,6 +184,7 @@ export default function Explore() {
               </div>
             );
           })}
+
           {filtered.length === 0 && (
             <div className="alert alert-light border mt-3">
               No results. Try clearing filters or increasing distance.
@@ -200,7 +210,7 @@ export default function Explore() {
                       className="form-check-input"
                       type="checkbox"
                       id={`t-${t}`}
-                      checked={filterTypes[t]}
+                      checked={!!filterTypes[t]}
                       onChange={(e) =>
                         setFilterTypes((prev) => ({ ...prev, [t]: e.target.checked }))
                       }

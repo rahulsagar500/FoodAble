@@ -1,0 +1,89 @@
+# docker-compose.yml (place in C:\Foodable\api)
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: foodable_postgres
+    environment:
+      POSTGRES_USER: foodable
+      POSTGRES_PASSWORD: foodable
+      POSTGRES_DB: foodable
+    ports:
+      - "5435:5435"                # expose DB on host (optional)
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U foodable -d foodable"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  adminer:
+    image: adminer
+    depends_on:
+      - postgres
+    ports:
+      - "8087:8080"
+
+  migrator:
+    build:
+      context: .
+      dockerfile: ./services/catalog/Dockerfile
+    env_file: [.env.compose]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["sh","-lc","npx prisma migrate deploy --schema=./prisma/schema.prisma"]
+
+  auth:
+    build:
+      context: .
+      dockerfile: ./services/auth/Dockerfile
+    env_file: [.env.compose]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+    ports:
+      - "4001:4001"
+
+  catalog:
+    build:
+      context: .
+      dockerfile: ./services/catalog/Dockerfile
+    env_file: [.env.compose]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+    ports:
+      - "4002:4002"
+
+  orders:
+    build:
+      context: .
+      dockerfile: ./services/orders/Dockerfile
+    env_file: [.env.compose]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+    ports:
+      - "4003:4003"
+
+  gateway:
+    image: nginx:1.27-alpine
+    depends_on:
+      - auth
+      - catalog
+      - orders
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+
+volumes:
+  pgdata:
