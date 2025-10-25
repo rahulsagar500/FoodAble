@@ -54,4 +54,27 @@
   transform: scaleX(0); transform-origin: left center; transition: transform .25s ease; background: currentColor; opacity: .25;
 }
 .navlink-underline:hover::after, .navlink-underline.active::after { transform: scaleX(1); opacity: .7; }
+/* Small round avatar chip for initials */
+.avatar-chip {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.8rem;
+  background: #eef2ff;
+  color: #4f46e5;
+  border: 1px solid rgba(79,70,229,.2);
+}
+
+/* If we have a Google photo */
+.avatar-img {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  object-fit: cover;
+  border: 1px solid rgba(0,0,0,.08);
+}
 

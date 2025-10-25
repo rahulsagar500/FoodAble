@@ -12,12 +12,14 @@ const { body, validationResult } = require("express-validator");
 
 const prisma = new PrismaClient();
 const app = express();
+
 const PORT = process.env.PORT || 4000;
+const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || "http://localhost:5173";
 
 // ----- Middleware
 app.use(
   cors({
-    origin: ["http://localhost:5173", "http://localhost:5174"],
+    origin: ["http://localhost:5173", "http://localhost:5174", FRONTEND_ORIGIN],
     credentials: true,
   })
 );
@@ -46,6 +48,17 @@ function mapOffer(o) {
     qty: o.qty,
     photoUrl: o.photoUrl,
   };
+}
+
+// Read/verify JWT from cookie
+function getSessionUser(req) {
+  const token = req.cookies?.[COOKIE_NAME];
+  if (!token) return null;
+  try {
+    return jwt.verify(token, process.env.JWT_SECRET); // { uid, email, role, ... }
+  } catch {
+    return null;
+  }
 }
 
 // Middleware: requireRole for user-based auth
@@ -80,6 +93,15 @@ function requireRole(...roles) {
   };
 }
 
+// Middleware: must NOT be logged in (prevents signing in twice)
+function requireAnonymous(req, res, next) {
+  const ses = getSessionUser(req);
+  if (ses) {
+    return res.status(409).json({ error: "already_authenticated" });
+  }
+  next();
+}
+
 // ----- Google OAuth (defaults to customer)
 passport.use(
   new GoogleStrategy(
@@ -97,7 +119,7 @@ passport.use(
         const name = profile.displayName || null;
         const googleId = profile.id;
 
-        // 1) If we already have a user with this googleId, update basic fields and return.
+        // 1) Existing googleId?
         let user = await prisma.user.findUnique({ where: { googleId } });
         if (user) {
           user = await prisma.user.update({
@@ -109,18 +131,16 @@ passport.use(
           });
         }
 
-        // 2) No googleId match — maybe the user previously signed up with the same email.
+        // 2) Link to existing email account (email signup earlier)
         const byEmail = await prisma.user.findUnique({ where: { email } });
         if (byEmail) {
-          // Attach googleId to the existing account (keeps their role/password if any)
           const updated = await prisma.user.update({
             where: { id: byEmail.id },
             data: {
               googleId,
-              // only fill blanks; don't stomp existing profile fields
               name: byEmail.name ?? name,
               avatarUrl: byEmail.avatarUrl ?? avatarUrl,
-              // role stays as-is (customer/restaurant/admin). If you always want customer, remove this line.
+              // keep existing role
             },
           });
           return done(null, {
@@ -128,7 +148,7 @@ passport.use(
           });
         }
 
-        // 3) Brand-new Google user → create as customer by default.
+        // 3) Brand-new Google user
         const created = await prisma.user.create({
           data: { email, googleId, name, avatarUrl, role: "customer" },
         });
@@ -137,10 +157,11 @@ passport.use(
           id: created.id, email: created.email, role: created.role, name: created.name, avatarUrl: created.avatarUrl,
         });
       } catch (e) {
-        // If we somehow race and still hit a unique collision, try the email-link path once more.
+        // rare race: email unique; try link-by-email fallback
         if (e?.code === "P2002" && Array.isArray(e.meta?.target) && e.meta.target.includes("email")) {
           try {
-            const fallback = await prisma.user.findUnique({ where: { email: profile.emails?.[0]?.value } });
+            const email = profile.emails?.[0]?.value;
+            const fallback = await prisma.user.findUnique({ where: { email } });
             if (fallback) {
               const linked = await prisma.user.update({
                 where: { id: fallback.id },
@@ -160,7 +181,6 @@ passport.use(
   )
 );
 
-
 // ----- Health
 app.get("/api/health", async (_req, res) => {
   try {
@@ -172,16 +192,22 @@ app.get("/api/health", async (_req, res) => {
 });
 
 // ----- Google OAuth routes
+// Start: if already signed in, skip OAuth and go home
 app.get(
   "/api/auth/google",
-  passport.authenticate("google", { scope: ["openid", "email", "profile"] })
+  (req, res, next) => {
+    const ses = getSessionUser(req);
+    if (ses) return res.redirect(FRONTEND_ORIGIN);
+    next();
+  },
+  passport.authenticate("google", { scope: ["openid", "email", "profile"], prompt: "select_account" })
 );
 
 app.get(
   "/api/auth/google/callback",
   passport.authenticate("google", {
     session: false,
-    failureRedirect: "http://localhost:5173",
+    failureRedirect: `${FRONTEND_ORIGIN}/signin?error=google_failed`,
   }),
   async (req, res) => {
     const token = signToken({
@@ -197,7 +223,7 @@ app.get(
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
-    res.redirect("http://localhost:5173");
+    res.redirect(FRONTEND_ORIGIN);
   }
 );
 
@@ -209,9 +235,7 @@ app.get(
 function checkValidation(req, res) {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
-    res
-      .status(400)
-      .json({ error: "validation_error", details: errors.array() });
+    res.status(400).json({ error: "validation_error", details: errors.array() });
     return false;
   }
   return true;
@@ -220,6 +244,7 @@ function checkValidation(req, res) {
 // OWNER REGISTER
 app.post(
   "/api/auth/owner/register",
+  requireAnonymous,
   body("email").isEmail().normalizeEmail(),
   body("password").isLength({ min: 6 }),
   body("name").isString().isLength({ min: 1 }).trim(),
@@ -231,25 +256,18 @@ app.post(
       let user = await prisma.user.findUnique({ where: { email } });
 
       if (user) {
-        // If user exists and already has a password, it's in use
         if (user.passwordHash) {
           return res.status(409).json({ error: "email_in_use" });
         }
-
-        // Else attach passwordHash and upgrade role if needed
         user = await prisma.user.update({
           where: { id: user.id },
           data: {
             passwordHash: await bcrypt.hash(password, 10),
             name: user.name || name,
-            role:
-              user.role === "admin" || user.role === "restaurant"
-                ? user.role
-                : "restaurant",
+            role: user.role === "admin" || user.role === "restaurant" ? user.role : "restaurant",
           },
         });
       } else {
-        // brand new restaurant owner
         user = await prisma.user.create({
           data: {
             email,
@@ -260,7 +278,6 @@ app.post(
         });
       }
 
-      // set cookie
       const token = signToken({
         uid: user.id,
         email: user.email,
@@ -290,6 +307,7 @@ app.post(
 // OWNER LOGIN
 app.post(
   "/api/auth/owner/login",
+  requireAnonymous,
   body("email").isEmail().normalizeEmail(),
   body("password").isString().isLength({ min: 6 }),
   async (req, res) => {
@@ -307,7 +325,6 @@ app.post(
         return res.status(401).json({ error: "invalid_credentials" });
       }
 
-      // Make sure they are at least restaurant
       if (user.role !== "restaurant" && user.role !== "admin") {
         user = await prisma.user.update({
           where: { id: user.id },
@@ -344,6 +361,7 @@ app.post(
 // CUSTOMER REGISTER
 app.post(
   "/api/auth/customer/register",
+  requireAnonymous,
   body("email").isEmail().normalizeEmail(),
   body("password").isLength({ min: 6 }),
   body("name").isString().isLength({ min: 1 }).trim(),
@@ -358,17 +376,12 @@ app.post(
         if (user.passwordHash) {
           return res.status(409).json({ error: "email_in_use" });
         }
-
-        // attach passwordHash; set role to customer unless they're already admin
         user = await prisma.user.update({
           where: { id: user.id },
           data: {
             passwordHash: await bcrypt.hash(password, 10),
             name: user.name || name,
-            role:
-              user.role === "admin" || user.role === "customer"
-                ? user.role
-                : "customer",
+            role: user.role === "admin" || user.role === "customer" ? user.role : "customer",
           },
         });
       } else {
@@ -411,6 +424,7 @@ app.post(
 // CUSTOMER LOGIN
 app.post(
   "/api/auth/customer/login",
+  requireAnonymous,
   body("email").isEmail().normalizeEmail(),
   body("password").isString().isLength({ min: 6 }),
   async (req, res) => {
@@ -436,6 +450,10 @@ app.post(
         avatarUrl: user.avatarUrl,
       });
 
+      res.cookie(COOKIE_NAME, {
+        ...COOKIE_OPTIONS,
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+      }); // <-- keep cookie options separate
       res.cookie(COOKIE_NAME, token, {
         ...COOKIE_OPTIONS,
         maxAge: 7 * 24 * 60 * 60 * 1000,
@@ -552,9 +570,6 @@ app.get("/api/offers/:id", async (req, res, next) => {
 // ===================================================================================
 
 // Get or upsert the owner's Restaurant
-// Behavior:
-// - GET: returns the current user's restaurant (or null if they haven't made one yet)
-// - POST: create or update the restaurant for this user
 app.get(
   "/api/me/restaurant",
   requireRole("restaurant", "admin"),
@@ -680,10 +695,8 @@ app.post(
     try {
       const result = await prisma.$transaction(async (tx) => {
         const offer = await tx.offer.findUnique({ where: { id } });
-        if (!offer)
-          return { status: 404, error: "Offer not found" };
-        if (offer.qty <= 0)
-          return { status: 409, error: "Sold out" };
+        if (!offer) return { status: 404, error: "Offer not found" };
+        if (offer.qty <= 0) return { status: 409, error: "Sold out" };
 
         await tx.offer.update({
           where: { id },

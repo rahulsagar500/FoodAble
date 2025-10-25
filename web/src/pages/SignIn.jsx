@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+// web/src/pages/SignIn.jsx
+import React, { useEffect, useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 
 export default function SignIn() {
@@ -9,6 +10,16 @@ export default function SignIn() {
   const [form, setForm] = useState({ email: "", password: "" });
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // If already authenticated, bounce immediately
+  useEffect(() => {
+    fetch("http://localhost:4000/api/auth/me", { credentials: "include" })
+      .then((r) => r.json())
+      .then((me) => {
+        if (me && me.id) navigate(to, { replace: true });
+      })
+      .catch(() => {});
+  }, [navigate, to]);
 
   function onChange(e) {
     setForm((s) => ({ ...s, [e.target.name]: e.target.value }));
@@ -35,7 +46,6 @@ export default function SignIn() {
     }
   }
 
-  // Starts Google OAuth on the backend; backend redirects back to http://localhost:5173
   function signInWithGoogle() {
     window.location.href = "http://localhost:4000/api/auth/google";
   }
@@ -51,7 +61,6 @@ export default function SignIn() {
         onClick={signInWithGoogle}
         className="btn btn-outline-dark w-100 d-flex align-items-center justify-content-center gap-2 mb-3"
       >
-        {/* Simple Google "G" SVG */}
         <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
           <path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303C33.55 31.676 29.17 35 24 35c-6.075 0-11-4.925-11-11s4.925-11 11-11c2.803 0 5.357 1.064 7.291 2.809l5.657-5.657C33.64 7.14 29.053 5 24 5 12.954 5 4 13.954 4 25s8.954 20 20 20 20-8.954 20-20c0-1.341-.138-2.65-.389-3.917z"/>
           <path fill="#FF3D00" d="M6.306 14.691l6.571 4.818C14.52 16.303 18.879 13 24 13c2.803 0 5.357 1.064 7.291 2.809l5.657-5.657C33.64 7.14 29.053 5 24 5 16.318 5 9.784 9.337 6.306 14.691z"/>
