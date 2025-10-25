@@ -1,160 +1,137 @@
-import React, { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+// web/src/pages/cart.jsx
+import { useMemo, useState } from "react";
 import { useCart } from "../cart/CartContext.jsx";
-import { reserveOffer } from "../api/offers";
 import { formatPrice } from "../lib/format";
+import useMe from "../lib/useMe";
+import LoginPrompt from "../components/LoginPrompt";
+import { checkoutCart } from "../api/offers";
 
-export default function Cart() {
-  const { items, itemCount, totalCents, setQty, remove, clear } = useCart();
-  const [checkingOut, setCheckingOut] = useState(false);
-  const [result, setResult] = useState(null); // { ok: true, orders:[], errors:[] }
+export default function CartPage() {
+  const { items: rawItems, inc, dec, remove, clear } = useCart();
+  const items = Array.isArray(rawItems) ? rawItems : []; // <-- harden
+  const { isAuthed } = useMe();
+  const [showLogin, setShowLogin] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
 
-  const rows = useMemo(() => Object.values(items), [items]);
+  const totalCents = useMemo(
+    () => items.reduce((sum, it) => sum + (it.offer?.priceCents ?? it.priceCents ?? 0) * (it.qty ?? 0), 0),
+    [items]
+  );
 
-  async function onCheckout() {
-    if (itemCount === 0 || checkingOut) return;
-    setCheckingOut(true);
-    const orders = [];
-    const errors = [];
-
-    for (const it of rows) {
-      // Reserve `qty` times (one order per unit)
-      for (let k = 0; k < it.qty; k++) {
-        try {
-          const res = await reserveOffer(it.id);
-          orders.push({ offerId: it.id, orderId: res.orderId, title: it.title });
-        } catch (e) {
-          errors.push({ offerId: it.id, title: it.title, msg: e?.response?.data?.error || e.message });
-          break; // stop trying this item if it failed (likely sold out)
-        }
-      }
+  const onCheckout = async () => {
+    setError("");
+    setResult(null);
+    if (!isAuthed) {
+      setShowLogin(true);
+      return;
     }
+    if (items.length === 0) return;
 
-    // Clear cart on full success; else leave cart so user can adjust
-    if (errors.length === 0) clear();
+    const payload = items.map((it) => ({
+      offerId: it.offer?.id ?? it.id,
+      qty: it.qty ?? 1,
+    }));
 
-    setResult({ ok: errors.length === 0, orders, errors });
-    setCheckingOut(false);
-  }
-
-  if (itemCount === 0 && !result) {
-    return (
-      <div className="container my-5">
-        <h1 className="h4 mb-3">Your Cart</h1>
-        <div className="alert alert-light border">Your cart is empty.</div>
-        <Link to="/" className="btn btn-dark mt-2">Browse restaurants</Link>
-      </div>
-    );
-  }
+    try {
+      setBusy(true);
+      const res = await checkoutCart(payload);
+      setResult(res);
+      clear();
+    } catch (e) {
+      setError(e?.response?.data?.message || e.message || "Checkout failed");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
-    <div className="container my-5" style={{ maxWidth: 900 }}>
-      <h1 className="h4 mb-3">Your Cart</h1>
+    <div className="container py-4">
+      <h3 className="mb-3">Your cart</h3>
 
-      {result && (
-        <div className={`alert ${result.ok ? "alert-success" : "alert-warning"}`}>
-          {result.ok ? (
-            <>
-              <strong>Success!</strong> {result.orders.length} order(s) placed. Show the Order ID(s) at pickup.
-              <ul className="mt-2 mb-0">
-                {result.orders.map((o) => (
-                  <li key={o.orderId}><code>{o.orderId}</code> — {o.title}</li>
-                ))}
-              </ul>
-            </>
-          ) : (
-            <>
-              <strong>Some items could not be reserved.</strong>
-              <ul className="mt-2 mb-0">
-                {result.errors.map((e, i) => (
-                  <li key={i}>
-                    {e.title}: <code>{e.msg}</code>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-        </div>
+      {error && <div className="alert alert-danger">{error}</div>}
+      {result?.orderIds?.length > 0 && (
+        <div className="alert alert-success">Reserved! Order IDs: {result.orderIds.join(", ")}</div>
       )}
 
-      {rows.length > 0 && (
-        <div className="card shadow-sm">
+      {items.length === 0 ? (
+        <div className="text-muted">Your cart is empty.</div>
+      ) : (
+        <>
           <div className="table-responsive">
-            <table className="table align-middle mb-0">
-              <thead className="table-light">
+            <table className="table align-middle">
+              <thead>
                 <tr>
-                  <th style={{ width: 80 }}></th>
                   <th>Item</th>
-                  <th style={{ width: 150 }}>Price</th>
-                  <th style={{ width: 160 }}>Qty</th>
-                  <th style={{ width: 150 }}>Subtotal</th>
+                  <th style={{ width: 140 }}>Price</th>
+                  <th style={{ width: 170 }}>Qty</th>
+                  <th style={{ width: 140 }}>Subtotal</th>
                   <th style={{ width: 80 }}></th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((it) => (
-                  <tr key={it.id}>
-                    <td>
-                      <img src={it.photoUrl} alt={it.title} style={{ width: 72, height: 48, objectFit: "cover" }} />
-                    </td>
-                    <td>
-                      <div className="fw-semibold">{it.title}</div>
-                      <div className="text-muted small">{it.restaurant}</div>
-                    </td>
-                    <td>{formatPrice(it.priceCents)}</td>
-                    <td>
-                      <div className="input-group">
-                        <button className="btn btn-outline-secondary" onClick={() => setQty(it.id, it.qty - 1)}>-</button>
-                        <input
-                          type="number"
-                          className="form-control text-center"
-                          min="1"
-                          value={it.qty}
-                          onChange={(e) => {
-                            const v = Math.max(1, parseInt(e.target.value || "1", 10));
-                            setQty(it.id, v);
-                          }}
-                        />
-                        <button className="btn btn-outline-secondary" onClick={() => setQty(it.id, it.qty + 1)}>+</button>
-                      </div>
-                    </td>
-                    <td className="fw-semibold">{formatPrice(it.qty * it.priceCents)}</td>
-                    <td>
-                      <button className="btn btn-link text-danger" onClick={() => remove(it.id)}>Remove</button>
-                    </td>
-                  </tr>
-                ))}
+                {items.map((it) => {
+                  const o = it.offer || it;
+                  const id = o?.id ?? Math.random().toString(36);
+                  const title = o?.title ?? "Item";
+                  const price = o?.priceCents ?? 0;
+                  const qty = it?.qty ?? 0;
+                  const subtotal = price * qty;
+                  return (
+                    <tr key={id}>
+                      <td>
+                        <div className="d-flex align-items-center gap-3">
+                          <img
+                            src={o?.photoUrl || "/placeholder.jpg"}
+                            alt={title}
+                            style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 8 }}
+                          />
+                          <div>
+                            <div className="fw-semibold">{title}</div>
+                            <div className="text-muted small">{o?.restaurant?.name}</div>
+                            <div className="text-muted small">
+                              Pickup {o?.pickup?.start}–{o?.pickup?.end}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="fw-semibold">{formatPrice(price)}</td>
+                      <td>
+                        <div className="btn-group" role="group">
+                          <button className="btn btn-outline-secondary" onClick={() => inc(o.id)} aria-label="Increase">+</button>
+                          <button className="btn btn-light" disabled>{qty}</button>
+                          <button className="btn btn-outline-secondary" onClick={() => dec(o.id)} aria-label="Decrease">-</button>
+                        </div>
+                      </td>
+                      <td className="fw-semibold">{formatPrice(subtotal)}</td>
+                      <td>
+                        <button className="btn btn-outline-danger btn-sm" onClick={() => remove(o.id)}>Remove</button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
-              <tfoot className="table-light">
+              <tfoot>
                 <tr>
-                  <td colSpan="4" className="text-end pe-3">Total:</td>
+                  <td colSpan={3} className="text-end fw-semibold">Total</td>
                   <td className="fw-bold">{formatPrice(totalCents)}</td>
                   <td></td>
                 </tr>
               </tfoot>
             </table>
           </div>
-        </div>
+
+          <div className="d-flex gap-2">
+            <button className="btn btn-outline-secondary" onClick={clear} disabled={busy}>Clear cart</button>
+            <button className="btn btn-primary" onClick={onCheckout} disabled={busy}>
+              {busy ? "Processing…" : "Checkout & Reserve"}
+            </button>
+          </div>
+        </>
       )}
 
-      <div className="d-flex justify-content-between align-items-center mt-3">
-        <Link to="/" className="btn btn-outline-secondary">Continue browsing</Link>
-        <div className="d-flex align-items-center gap-2">
-          <button className="btn btn-outline-danger" onClick={() => clear()} disabled={rows.length === 0}>
-            Clear cart
-          </button>
-          <button className="btn btn-dark" onClick={onCheckout} disabled={rows.length === 0 || checkingOut}>
-            {checkingOut ? (
-              <>
-                <span className="spinner-border spinner-border-sm me-2" role="status" />
-                Processing…
-              </>
-            ) : (
-              "Checkout"
-            )}
-          </button>
-        </div>
-      </div>
+      <LoginPrompt show={showLogin} onClose={() => setShowLogin(false)} />
     </div>
   );
 }

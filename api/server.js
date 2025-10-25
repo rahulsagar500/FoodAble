@@ -515,6 +515,101 @@ app.delete("/api/offers/:id", requireRole("restaurant", "admin"), async (req, re
   } catch (e) { next(e); }
 });
 
+// ===== Orders / Checkout =====
+
+// Reserve ONE unit of an offer, create an Order, and decrement qty atomically
+app.post("/api/offers/:id/reserve", async (req, res) => {
+  const offerId = req.params.id;
+  try {
+    const order = await prisma.$transaction(async (tx) => {
+      // Decrement qty only if > 0
+      const dec = await tx.offer.updateMany({
+        where: { id: offerId, qty: { gt: 0 } },
+        data: { qty: { decrement: 1 } },
+      });
+      if (dec.count === 0) {
+        // Either offer not found or sold out
+        const exists = await tx.offer.findUnique({ where: { id: offerId }, select: { id: true } });
+        const code = exists ? "sold_out" : "not_found";
+        const msg = exists ? "Offer is sold out" : "Offer not found";
+        const status = exists ? 409 : 404;
+        const err = new Error(msg);
+        err.code = code;
+        err.status = status;
+        throw err;
+      }
+
+      // Create order
+      const created = await tx.order.create({
+        data: { offerId },
+        select: { id: true },
+      });
+
+      return created;
+    });
+
+    return res.json({ ok: true, orderId: order.id });
+  } catch (e) {
+    const status = e.status || 500;
+    const code = e.code || "reserve_failed";
+    return res.status(status).json({ ok: false, code, message: e.message || "Failed to reserve offer" });
+  }
+});
+
+// Reserve MANY in one go (cart checkout). Body: { items: [{ offerId, qty }] }
+app.post("/api/cart/checkout", async (req, res) => {
+  const items = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (items.length === 0) {
+    return res.status(400).json({ ok: false, code: "bad_request", message: "items[] required" });
+  }
+
+  // Normalise: merge same offerIds
+  const merged = new Map();
+  for (const it of items) {
+    if (!it?.offerId) continue;
+    const q = Math.max(1, Number(it.qty || 1) | 0);
+    merged.set(it.offerId, (merged.get(it.offerId) || 0) + q);
+  }
+
+  try {
+    const orderIds = await prisma.$transaction(async (tx) => {
+      const createdIds = [];
+
+      for (const [offerId, need] of merged) {
+        // Attempt 'need' decrements, one-by-one to honour qty>0 guard
+        for (let i = 0; i < need; i++) {
+          const dec = await tx.offer.updateMany({
+            where: { id: offerId, qty: { gt: 0 } },
+            data: { qty: { decrement: 1 } },
+          });
+          if (dec.count === 0) {
+            const exists = await tx.offer.findUnique({ where: { id: offerId }, select: { id: true, qty: true } });
+            const err = new Error(exists ? "Offer does not have enough quantity" : "Offer not found");
+            err.code = exists ? "insufficient_qty" : "not_found";
+            err.status = exists ? 409 : 404;
+            throw err;
+          }
+
+          const order = await tx.order.create({
+            data: { offerId },
+            select: { id: true },
+          });
+          createdIds.push(order.id);
+        }
+      }
+
+      return createdIds;
+    });
+
+    return res.json({ ok: true, orderIds });
+  } catch (e) {
+    const status = e.status || 500;
+    const code = e.code || "checkout_failed";
+    return res.status(status).json({ ok: false, code, message: e.message || "Checkout failed; nothing was reserved" });
+  }
+});
+
+
 // ----- Error handler
 app.use((err, _req, res, _next) => {
   console.error(err);

@@ -1,16 +1,23 @@
-import React, { useEffect, useState } from "react";
+// web/src/pages/RestaurantDetails.jsx
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getRestaurant } from "../api/restaurants";
-import { listOffersByRestaurant } from "../api/offers";
+import { listOffersByRestaurant, reserveOffer } from "../api/offers";
 import { useCart } from "../cart/CartContext.jsx";
 import { formatPrice } from "../lib/format";
+import useMe from "../lib/useMe";
+import LoginPrompt from "../components/LoginPrompt";
 
 export default function RestaurantDetails() {
   const { id } = useParams();
   const [rest, setRest] = useState(null);
   const [offers, setOffers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState(null);
+  const [errorId, setErrorId] = useState(null);
+  const [showLogin, setShowLogin] = useState(false);
   const { add } = useCart();
+  const { isAuthed } = useMe();
 
   useEffect(() => {
     let mounted = true;
@@ -20,89 +27,81 @@ export default function RestaurantDetails() {
     return () => { mounted = false; };
   }, [id]);
 
-  if (loading) return <div className="container my-5 text-muted">Loading…</div>;
-  if (!rest) {
-    return (
-      <div className="container my-5">
-        <div className="alert alert-danger">Restaurant not found</div>
-        <Link to="/restaurants" className="btn btn-outline-secondary">Back</Link>
-      </div>
-    );
-  }
+  if (loading) return <div className="container py-4">Loading…</div>;
+  if (!rest) return <div className="container py-4">Restaurant not found.</div>;
+
+  const onAdd = (offer) => add(offer);
+
+  const onReserve = async (offer) => {
+    setErrorId(null);
+    if (!isAuthed) {
+      setShowLogin(true);
+      return;
+    }
+    try {
+      setBusyId(offer.id);
+      const res = await reserveOffer(offer.id);
+      // optimistic qty decrement for that card
+      setOffers((prev) =>
+        prev.map((o) => (o.id === offer.id ? { ...o, qty: Math.max(0, (o.qty ?? 0) - 1) } : o))
+      );
+      alert(`Reserved! Order ID: ${res.orderId}`);
+    } catch (e) {
+      setErrorId(offer.id);
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   return (
-    <div>
-      <div className="position-relative">
-        <img src={rest.heroUrl} alt={rest.name} style={{ width: "100%", height: 260, objectFit: "cover" }} />
-        <div className="container position-absolute bottom-0 start-0 end-0">
-          <div className="bg-dark text-white d-inline-block px-3 py-2 rounded-top">
-            <h1 className="h3 m-0">{rest.name}</h1>
-            <div className="text-muted small">{rest.area}</div>
-          </div>
+    <div className="container py-4">
+      <div className="d-flex align-items-center gap-3 mb-3">
+        <img src={rest.heroUrl || "/placeholder.jpg"} alt={rest.name} style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 8 }} />
+        <div>
+          <h2 className="mb-0">{rest.name}</h2>
+          {rest.area && <div className="text-muted">{rest.area}</div>}
         </div>
       </div>
 
-      <div className="container my-4">
-        <Link to="/" className="btn btn-link">&larr; All restaurants</Link>
-
-        <div className="row g-3 mt-2">
-          {offers.map((o) => {
-            const pct = Math.round((1 - o.priceCents / o.originalPriceCents) * 100) || 0;
-            const sold = o.qty <= 0;
-            return (
-              <div className="col-12 col-md-6" key={o.id}>
-                <div className="card h-100">
-                  <img src={o.photoUrl} className="card-img-top" alt={o.title} style={{ height: 180, objectFit: "cover" }} />
-                  <div className="card-body d-flex flex-column">
-                    <div className="d-flex align-items-center gap-2">
-                      <span className="badge bg-secondary text-uppercase">{o.type}</span>
-                      <h3 className="h5 m-0">{o.title}</h3>
-                    </div>
-                    <div className="mt-2">
-                      <span className="fw-semibold">{formatPrice(o.priceCents)}</span>
-                      <span className="text-muted text-decoration-line-through ms-2">
-                        {formatPrice(o.originalPriceCents)}
-                      </span>
-                      <span className="ms-2 badge bg-success">{pct}% off</span>
-                    </div>
-                    <div className="small text-muted mt-1">
-                      Pickup {o.pickup.start}–{o.pickup.end}
-                    </div>
-                    <div className="mt-auto d-flex justify-content-between align-items-center">
-                      <span className={`badge ${sold ? "bg-danger" : "bg-primary"}`}>
-                        {sold ? "Sold out" : `${o.qty} left`}
-                      </span>
-                      <div className="d-flex gap-2">
-                        <Link to={`/offers/${o.id}`} className="btn btn-outline-secondary">View</Link>
-                        <button
-                          className="btn btn-dark"
-                          disabled={sold}
-                          onClick={() =>
-                            add({
-                              id: o.id,
-                              title: o.title,
-                              restaurant: rest.name,
-                              priceCents: o.priceCents,
-                              photoUrl: o.photoUrl,
-                            }, 1)
-                          }
-                        >
-                          Add to cart
-                        </button>
-                      </div>
-                    </div>
+      <div className="row g-3">
+        {offers.map((o) => {
+          const pct = Math.max(0, Math.round(100 - (o.priceCents / o.originalPriceCents) * 100));
+          return (
+            <div key={o.id} className="col-md-6 col-xl-4">
+              <div className="card h-100">
+                <img className="card-img-top" src={o.photoUrl || "/placeholder.jpg"} alt={o.title} />
+                <div className="card-body d-flex flex-column">
+                  <h5 className="card-title">{o.title}</h5>
+                  <div className="mb-1">
+                    <span className="badge bg-success me-2">{pct}% OFF</span>
+                    <strong className="me-2">{formatPrice(o.priceCents)}</strong>
+                    <span className="text-muted text-decoration-line-through">{formatPrice(o.originalPriceCents)}</span>
                   </div>
+                  <div className="text-muted mb-2">
+                    Pickup {o.pickup?.start}–{o.pickup?.end} · Qty left: <strong>{o.qty ?? 0}</strong>
+                  </div>
+                  <div className="mt-auto d-flex gap-2">
+                    <button className="btn btn-outline-primary" onClick={() => onAdd(o)} disabled={(o.qty ?? 0) <= 0}>
+                      Add to cart
+                    </button>
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => onReserve(o)}
+                      disabled={busyId === o.id || (o.qty ?? 0) <= 0}
+                    >
+                      {busyId === o.id ? "Reserving…" : "Reserve"}
+                    </button>
+                    <Link to={`/offers/${o.id}`} className="btn btn-link">Details</Link>
+                  </div>
+                  {errorId === o.id && <div className="text-danger mt-2">Could not reserve. Try again.</div>}
                 </div>
               </div>
-            );
-          })}
-          {offers.length === 0 && (
-            <div className="col-12">
-              <div className="alert alert-light border">No offers yet.</div>
             </div>
-          )}
-        </div>
+          );
+        })}
       </div>
+
+      <LoginPrompt show={showLogin} onClose={() => setShowLogin(false)} />
     </div>
   );
 }

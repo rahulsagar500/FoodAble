@@ -1,89 +1,98 @@
-import React, { createContext, useContext, useEffect, useMemo, useReducer } from "react";
+// web/src/cart/CartContext.jsx
+import { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
 
 const CartContext = createContext(null);
+const LS_KEY = "foodable_cart_v1";
 
-const initialState = { items: {} }; // items[offerId] = { id, title, restaurant, priceCents, photoUrl, qty }
-
-function reducer(state, action) {
-  switch (action.type) {
-    case "INIT":
-      return action.payload || initialState;
-
-    case "ADD": {
-      const { item, qty = 1 } = action.payload;
-      const existing = state.items[item.id];
-      const newQty = (existing?.qty || 0) + qty;
-      return { ...state, items: { ...state.items, [item.id]: { ...item, qty: newQty } } };
-    }
-
-    case "SET_QTY": {
-      const { id, qty } = action.payload;
-      const current = state.items[id];
-      if (!current) return state;
-      if (qty <= 0) {
-        const next = { ...state.items };
-        delete next[id];
-        return { ...state, items: next };
-      }
-      return { ...state, items: { ...state.items, [id]: { ...current, qty } } };
-    }
-
-    case "REMOVE": {
-      const next = { ...state.items };
-      delete next[action.payload.id];
-      return { ...state, items: next };
-    }
-
-    case "CLEAR":
-      return initialState;
-
-    default:
-      return state;
-  }
+/**
+ * Item shape we store:
+ * { id: string, qty: number, offer: { ...offer fields we display... } }
+ */
+function normaliseOffer(offer) {
+  if (!offer || !offer.id) throw new Error("Offer missing id");
+  // Keep only fields the UI needs
+  const {
+    id, title, priceCents, originalPriceCents, photoUrl,
+    pickup, restaurant,
+  } = offer;
+  return { id, title, priceCents, originalPriceCents, photoUrl, pickup, restaurant };
 }
 
 export function CartProvider({ children }) {
-  const [state, dispatch] = useReducer(reducer, initialState);
+  const [items, setItems] = useState(() => {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
 
-  // Load from localStorage on mount
+  // Persist to localStorage
   useEffect(() => {
     try {
-      const raw = localStorage.getItem("cart");
-      if (raw) dispatch({ type: "INIT", payload: JSON.parse(raw) });
-    } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      localStorage.setItem(LS_KEY, JSON.stringify(items));
+    } catch {
+      // ignore quota errors
+    }
+  }, [items]);
+
+  // --- actions ---
+  const add = useCallback((offer, qty = 1) => {
+    const o = normaliseOffer(offer);
+    setItems((prev) => {
+      const arr = Array.isArray(prev) ? [...prev] : [];
+      const i = arr.findIndex((it) => it.id === o.id);
+      if (i >= 0) {
+        arr[i] = { ...arr[i], qty: arr[i].qty + qty };
+      } else {
+        arr.push({ id: o.id, qty, offer: o });
+      }
+      return arr;
+    });
   }, []);
 
-  // Persist on change
-  useEffect(() => {
-    localStorage.setItem("cart", JSON.stringify(state));
-  }, [state]);
+  const inc = useCallback((id, step = 1) => {
+    setItems((prev) =>
+      (Array.isArray(prev) ? prev : []).map((it) =>
+        it.id === id ? { ...it, qty: it.qty + step } : it
+      )
+    );
+  }, []);
 
-  const itemCount = useMemo(
-    () => Object.values(state.items).reduce((sum, it) => sum + it.qty, 0),
-    [state]
-  );
-  const totalCents = useMemo(
-    () => Object.values(state.items).reduce((sum, it) => sum + it.qty * it.priceCents, 0),
-    [state]
+  const dec = useCallback((id, step = 1) => {
+    setItems((prev) =>
+      (Array.isArray(prev) ? prev : []).flatMap((it) => {
+        if (it.id !== id) return it;
+        const nextQty = it.qty - step;
+        return nextQty > 0 ? { ...it, qty: nextQty } : [];
+      })
+    );
+  }, []);
+
+  const remove = useCallback((id) => {
+    setItems((prev) => (Array.isArray(prev) ? prev : []).filter((it) => it.id !== id));
+  }, []);
+
+  const clear = useCallback(() => setItems([]), []);
+
+  // Derived values
+  const count = useMemo(
+    () => (Array.isArray(items) ? items.reduce((n, it) => n + (it.qty || 0), 0) : 0),
+    [items]
   );
 
   const value = useMemo(
-    () => ({
-      items: state.items,
-      itemCount,
-      totalCents,
-      add: (item, qty = 1) => dispatch({ type: "ADD", payload: { item, qty } }),
-      setQty: (id, qty) => dispatch({ type: "SET_QTY", payload: { id, qty } }),
-      remove: (id) => dispatch({ type: "REMOVE", payload: { id } }),
-      clear: () => dispatch({ type: "CLEAR" }),
-    }),
-    [state, itemCount, totalCents]
+    () => ({ items: Array.isArray(items) ? items : [], add, inc, dec, remove, clear, count }),
+    [items, add, inc, dec, remove, clear, count]
   );
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 }
 
 export function useCart() {
-  return useContext(CartContext);
+  const ctx = useContext(CartContext);
+  if (!ctx) throw new Error("useCart must be used within <CartProvider>");
+  return ctx;
 }
