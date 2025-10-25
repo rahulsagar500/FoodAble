@@ -1,3 +1,5 @@
+// prisma/schema.prisma
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -7,27 +9,63 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-
+// ===== Enums =====
 enum OfferType {
   discount
   mystery
   donation
 }
 
-model Restaurant {
-  id        String   @id @default(cuid())
-  name      String
-  area      String?
-  heroUrl   String
-  offers    Offer[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+enum UserRole {
+  customer
+  restaurant
+  admin
 }
 
+// ===== Models =====
+
+// Everyone in the system: customers, restaurant owners, admins.
+// We store auth creds here directly (passwordHash or googleId).
+model User {
+  id           String    @id @default(cuid())
+  googleId     String?   @unique
+  email        String    @unique
+  passwordHash String?   // null for accounts that only use Google OAuth
+  name         String?
+  avatarUrl    String?
+  role         UserRole  @default(customer)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  Restaurant Restaurant[] @relation("OwnerRestaurants")
+}
+
+// A physical restaurant / venue owned by a User whose role is "restaurant".
+model Restaurant {
+  id          String   @id @default(cuid())
+  name        String
+  area        String?
+  heroUrl     String
+
+  ownerUserId String
+  owner       User     @relation("OwnerRestaurants", fields: [ownerUserId], references: [id])
+
+  offers      Offer[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerUserId])
+}
+
+// Offer posted by a restaurant (what the customer sees / buys)
 model Offer {
   id                 String     @id @default(cuid())
   restaurantId       String
   restaurant         Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
   title              String
   type               OfferType  @default(discount)
   priceCents         Int
@@ -37,13 +75,16 @@ model Offer {
   pickupEnd          String
   qty                Int        @default(0)
   photoUrl           String?
+
   orders             Order[]
-  createdAt          DateTime   @default(now())
-  updatedAt          DateTime   @updatedAt
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([restaurantId])
 }
 
+// Reservation for an offer
 model Order {
   id        String   @id @default(cuid())
   offerId   String
@@ -53,21 +94,3 @@ model Order {
 
   @@index([offerId])
 }
-
-enum UserRole {
-  customer
-  restaurant
-  admin
-}
-
-model User {
-  id        String   @id @default(cuid())
-  googleId  String   @unique
-  email     String   @unique
-  name      String?
-  avatarUrl String?
-  role      UserRole @default(customer)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-

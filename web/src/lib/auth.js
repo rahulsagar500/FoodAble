@@ -1,6 +1,7 @@
 // web/src/lib/auth.js
 import { api } from "./api";
 
+// ----- session helpers -----
 export async function getMe() {
   try {
     const { data } = await api.get("/auth/me");
@@ -16,4 +17,15 @@ export function loginUrl() {
 
 export async function logout() {
   await api.post("/auth/logout");
+}
+
+// ----- local (email/password) auth -----
+export async function registerLocal({ email, password, name, role }) {
+  const { data } = await api.post("/auth/register", { email, password, name, role });
+  return data; // user object, cookie is set by server
+}
+
+export async function loginLocal({ email, password }) {
+  const { data } = await api.post("/auth/login", { email, password });
+  return data; // user object, cookie is set by server
 }
