@@ -1,0 +1,3 @@
+# Ignore local secret override file (contains real credentials)
+secret.local.yaml
+

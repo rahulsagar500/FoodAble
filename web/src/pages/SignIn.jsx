@@ -1,6 +1,7 @@
 // web/src/pages/SignIn.jsx
 import React, { useEffect, useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
+import { api } from "../lib/api";
 
 export default function SignIn() {
   const navigate = useNavigate();
@@ -13,12 +14,9 @@ export default function SignIn() {
 
   // If already authenticated, bounce immediately
   useEffect(() => {
-    fetch("http://localhost:4000/api/auth/me", { credentials: "include" })
-      .then((r) => r.json())
-      .then((me) => {
-        if (me && me.id) navigate(to, { replace: true });
-      })
-      .catch(() => {});
+    api.get("/auth/me").then(({ data }) => {
+      if (data && data.id) navigate(to, { replace: true });
+    }).catch(() => {});
   }, [navigate, to]);
 
   function onChange(e) {
@@ -30,24 +28,18 @@ export default function SignIn() {
     setErr("");
     setSaving(true);
     try {
-      const res = await fetch("http://localhost:4000/api/auth/customer/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(form),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Invalid credentials");
+      const res = await api.post("/auth/customer/login", form);
+      if (res.status < 200 || res.status >= 300) throw new Error("Invalid credentials");
       navigate(to, { replace: true });
     } catch (e2) {
-      setErr(e2.message || "Invalid credentials");
+      setErr(e2?.response?.data?.error || e2.message || "Invalid credentials");
     } finally {
       setSaving(false);
     }
   }
 
   function signInWithGoogle() {
-    window.location.href = "http://localhost:4000/api/auth/google";
+    window.location.href = "/api/auth/google";
   }
 
   return (

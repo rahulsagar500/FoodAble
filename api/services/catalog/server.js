@@ -16,6 +16,13 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(cors({ origin: [FRONTEND_ORIGIN, "http://localhost:5174"], credentials: true }));
 
+// Identify service instance for load-balancing demos
+app.use((req, res, next) => {
+  res.set("X-Service", "catalog");
+  if (process.env.HOSTNAME) res.set("X-Instance", process.env.HOSTNAME);
+  next();
+});
+
 function parseUser(req, _res, next) {
   const tok = req.cookies?.[COOKIE_NAME];
   if (tok) { try { req.auth = jwt.verify(tok, JWT_SECRET); } catch {} }

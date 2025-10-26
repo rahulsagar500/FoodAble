@@ -1,6 +1,7 @@
 // src/pages/SignUp.jsx
 import React, { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
+import { api } from "../lib/api";
 
 export default function SignUp() {
   const [form, setForm] = useState({ name: "", email: "", password: "" });
@@ -14,29 +15,15 @@ export default function SignUp() {
     e.preventDefault();
     setErr(""); setBusy(true);
     try {
-      const res = await fetch("http://localhost:4000/api/auth/customer/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(form),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        if (data?.error === "already_authenticated") {
-          // Guard should have prevented this, but handle anyway.
-          return navigate("/", { replace: true });
-        }
-        if (data?.error === "email_in_use") {
-          throw new Error("That email is already in use. Try signing in instead.");
-        }
-        if (data?.error === "validation_error") {
-          throw new Error("Please check your name, email and password.");
-        }
-        throw new Error(data?.error || "Sign up failed");
-      }
+      const res = await api.post("/auth/customer/register", form);
+      if (res.status < 200 || res.status >= 300) throw new Error("Sign up failed");
       navigate("/", { replace: true });
     } catch (e2) {
-      setErr(e2.message || "Sign up failed");
+      const code = e2?.response?.data?.error || e2?.response?.data?.code;
+      if (code === "already_authenticated") return navigate("/", { replace: true });
+      if (code === "email_in_use") setErr("That email is already in use. Try signing in instead.");
+      else if (code === "validation_error") setErr("Please check your name, email and password.");
+      else setErr(e2.message || "Sign up failed");
     } finally {
       setBusy(false);
     }

@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: foodable-config
+  namespace: foodable
+data:
+  # Frontend origin for CORS; adjust if exposing via different host
+  FRONTEND_ORIGIN: "http://localhost:5173"
+  COOKIE_NAME: "token"
+  COOKIE_DAYS: "7"
+

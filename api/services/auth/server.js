@@ -30,6 +30,13 @@ app.use(
   })
 );
 
+// Identify service instance for load-balancing demos
+app.use((req, res, next) => {
+  res.set("X-Service", "auth");
+  if (process.env.HOSTNAME) res.set("X-Instance", process.env.HOSTNAME);
+  next();
+});
+
 // ======================
 // JWT helpers
 // ======================
