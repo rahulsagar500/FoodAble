@@ -139,14 +139,12 @@ kubectl -n "$NAMESPACE" rollout restart deployment auth catalog orders || true
 echo "Running Prisma migrations..."
 kubectl -n "$NAMESPACE" delete job prisma-migrate --ignore-not-found
 kubectl -n "$NAMESPACE" apply -f infra/k8s/jobs/migrate.yaml
-kubectl -n "$NAMESPACE" patch job prisma-migrate -p '{"spec":{"template":{"spec":{"serviceAccountName":"app-sa"}}}}'
 kubectl -n "$NAMESPACE" wait --for=condition=complete job/prisma-migrate --timeout=300s
 
 if [[ "$SEED" == "true" ]]; then
   echo "Seeding demo data..."
   kubectl -n "$NAMESPACE" delete job prisma-seed --ignore-not-found
   kubectl -n "$NAMESPACE" apply -f infra/k8s/jobs/seed.yaml
-  kubectl -n "$NAMESPACE" patch job prisma-seed -p '{"spec":{"template":{"spec":{"serviceAccountName":"app-sa"}}}}'
   kubectl -n "$NAMESPACE" wait --for=condition=complete job/prisma-seed --timeout=300s
 fi
 
