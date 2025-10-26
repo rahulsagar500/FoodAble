@@ -1,6 +1,7 @@
 // web/src/pages/OwnerSignUp.jsx
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { api } from "../lib/api";
 
 export default function OwnerSignUp() {
   const [form, setForm] = useState({
@@ -20,19 +21,20 @@ export default function OwnerSignUp() {
     e.preventDefault();
     setErr(""); setBusy(true);
     try {
-      const res = await fetch("http://localhost:4000/api/auth/owner/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(form),
-      });
-      const data = await res.json();
-      if (!res.ok || !data?.success) {
-        throw new Error(data?.error || "Sign up failed");
-      }
+      const restaurantPayload = {
+        name: (form.restaurantName || `${form.name || "My"} Restaurant`).trim(),
+        area: form.area?.trim() || null,
+        heroUrl: form.heroUrl?.trim() || "https://picsum.photos/1200/400",
+      };
+      const payload = {
+        ...form,
+        restaurant: restaurantPayload,
+      };
+      const res = await api.post("/auth/owner/register", payload);
+      if (res.status < 200 || res.status >= 300) throw new Error("Sign up failed");
       navigate("/owner/portal", { replace: true });
     } catch (e2) {
-      setErr(e2.message);
+      setErr(e2?.response?.data?.error || e2.message || "Sign up failed");
     } finally {
       setBusy(false);
     }
@@ -59,15 +61,15 @@ export default function OwnerSignUp() {
 
           <div className="col-md-6">
             <label className="form-label">Restaurant name</label>
-            <input className="form-control" value={form.restaurantName} onChange={(e)=>set("restaurantName", e.target.value)} />
+            <input className="form-control" value={form.restaurantName} onChange={(e)=>set("restaurantName", e.target.value)} placeholder="e.g. FoodAble Deli" />
           </div>
           <div className="col-md-3">
             <label className="form-label">Area/Suburb</label>
-            <input className="form-control" value={form.area} onChange={(e)=>set("area", e.target.value)} />
+            <input className="form-control" value={form.area} onChange={(e)=>set("area", e.target.value)} placeholder="Fortitude Valley" />
           </div>
           <div className="col-md-3">
             <label className="form-label">Hero image URL</label>
-            <input className="form-control" value={form.heroUrl} onChange={(e)=>set("heroUrl", e.target.value)} />
+            <input className="form-control" value={form.heroUrl} onChange={(e)=>set("heroUrl", e.target.value)} placeholder="https://..." />
           </div>
 
           <div className="col-12">

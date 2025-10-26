@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { listOffers, formatPrice } from "../api/offers";
+import { listOffers } from "../api/offers";
+import { formatPrice } from "../lib/format";
 
-export default function Explore() {
+export default function Restaurants() {
   const [offers, setOffers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);

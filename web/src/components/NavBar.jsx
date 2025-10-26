@@ -1,6 +1,7 @@
 // src/components/NavBar.jsx
 import React, { useEffect, useState } from "react";
 import { NavLink, Link, useLocation, useNavigate } from "react-router-dom";
+import { api } from "../lib/api";
 
 export default function NavBar() {
   const loc = useLocation();
@@ -12,8 +13,7 @@ export default function NavBar() {
 
   async function loadMe() {
     try {
-      const res = await fetch("http://localhost:4000/api/auth/me", { credentials: "include" });
-      const data = await res.json();
+      const { data } = await api.get("/auth/me");
       setMe(data && data.id ? data : null);
     } catch {
       setMe(null);
@@ -35,8 +35,7 @@ export default function NavBar() {
 
   async function onLogout(e) {
     e.preventDefault();
-    try { await fetch("http://localhost:4000/api/auth/logout", { method: "POST", credentials: "include" }); }
-    catch {}
+    try { await api.post("/auth/logout"); } catch {}
     setMe(null);
     navigate("/", { replace: true });
   }

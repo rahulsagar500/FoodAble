@@ -1,5 +1,6 @@
 // web/src/pages/OwnerPortal.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
+import { api } from "../lib/api";
 
 export default function OwnerPortal() {
   const [me, setMe] = useState(null);
@@ -26,24 +27,40 @@ export default function OwnerPortal() {
   const setO = (k, v) => setOform((s) => ({ ...s, [k]: v }));
 
   async function loadMe() {
-    const res = await fetch("http://localhost:4000/api/auth/me", { credentials: "include" });
-    const data = await res.json();
+    const { data } = await api.get("/auth/me");
     setMe(data && data.id ? data : null);
   }
 
   async function loadRestaurant() {
-    const res = await fetch("http://localhost:4000/api/me/restaurant", { credentials: "include" });
-    if (res.status === 401) { setErr("Please sign in as an owner."); return; }
-    const data = await res.json();
-    setRestaurant(data);
-    if (data) setRform({ name: data.name, area: data.area || "", heroUrl: data.heroUrl || "" });
+    try {
+      const { data } = await api.get("/me/restaurant");
+      setRestaurant(data);
+      if (data) {
+        setRform({ name: data.name, area: data.area || "", heroUrl: data.heroUrl || "" });
+      } else {
+        setRform({ name: "", area: "", heroUrl: "" });
+      }
+    } catch (e) {
+      if (e?.response?.status === 401) {
+        setErr("Please sign in as an owner.");
+      } else {
+        setErr("Failed to load restaurant profile.");
+      }
+      setRestaurant(null);
+      setRform({ name: "", area: "", heroUrl: "" });
+    }
   }
 
   async function loadOffers() {
-    const res = await fetch("http://localhost:4000/api/me/offers", { credentials: "include" });
-    if (!res.ok) { setOffers([]); return; }
-    const data = await res.json();
-    setOffers(Array.isArray(data) ? data : []);
+    try {
+      const { data } = await api.get("/me/offers");
+      setOffers(Array.isArray(data) ? data : []);
+    } catch (e) {
+      if (e?.response?.status === 401) {
+        setErr("Please sign in as an owner.");
+      }
+      setOffers([]);
+    }
   }
 
   useEffect(() => {
@@ -66,21 +83,18 @@ export default function OwnerPortal() {
     return Number.isFinite(d) ? Math.round(d) : 0;
   };
 
+  const canCreateOffers = !!restaurant;
+
   async function saveRestaurant(e) {
     e.preventDefault();
     setErr(""); setBusy(true);
     try {
-      const res = await fetch("http://localhost:4000/api/me/restaurant", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(rform),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Failed to save restaurant");
+      const payload = { ...rform, area: rform.area?.trim() || null };
+      const { data } = await api.post("/me/restaurant", payload);
       setRestaurant(data);
+      setRform({ name: data.name, area: data.area || "", heroUrl: data.heroUrl || "" });
     } catch (e2) {
-      setErr(e2.message);
+      setErr(e2?.response?.data?.error || e2.message || "Failed to save restaurant");
     } finally {
       setBusy(false);
     }
@@ -95,19 +109,18 @@ export default function OwnerPortal() {
         price: oform.price,
         originalPrice: oform.originalPrice,
       };
-      const res = await fetch("http://localhost:4000/api/offers", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Failed to create offer");
+      const { data } = await api.post("/offers", payload);
       setOffers((s) => [data, ...s]);
       // Reset minimal fields
       setOform((s) => ({ ...s, title: "", price: "", originalPrice: "", qty: "0", photoUrl: "" }));
     } catch (e2) {
-      setErr(e2.message);
+      if (e2?.response?.data?.code === "no_restaurant") {
+        setErr("Create your restaurant profile before adding offers.");
+      } else if (e2?.response?.data?.error) {
+        setErr(e2.response.data.error);
+      } else {
+        setErr(e2.message);
+      }
     } finally {
       setBusy(false);
     }
@@ -117,12 +130,7 @@ export default function OwnerPortal() {
     if (!confirm("Delete this offer?")) return;
     setErr("");
     try {
-      const res = await fetch(`http://localhost:4000/api/offers/${id}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Delete failed");
+      await api.delete(`/offers/${id}`);
       setOffers((s) => s.filter((o) => o.id !== id));
     } catch (e2) {
       setErr(e2.message);
@@ -165,46 +173,51 @@ export default function OwnerPortal() {
       <div className="card mb-4">
         <div className="card-body">
           <h5 className="card-title">Add a new offer</h5>
-          <form className="row g-3" onSubmit={createOffer}>
-            <div className="col-md-4">
-              <label className="form-label">Title</label>
-              <input className="form-control" value={oform.title} onChange={(e)=>setO("title", e.target.value)} required />
-            </div>
-            <div className="col-md-2">
-              <label className="form-label">Type</label>
-              <select className="form-select" value={oform.type} onChange={(e)=>setO("type", e.target.value)}>
-                <option value="discount">discount</option>
-                <option value="mystery">mystery</option>
-                <option value="donation">donation</option>
-              </select>
-            </div>
-            <div className="col-md-2">
-              <label className="form-label">Price (A$)</label>
-              <input type="number" step="0.01" className="form-control" value={oform.price} onChange={(e)=>setO("price", e.target.value)} required />
-            </div>
-            <div className="col-md-2">
-              <label className="form-label">Original (A$)</label>
-              <input type="number" step="0.01" className="form-control" value={oform.originalPrice} onChange={(e)=>setO("originalPrice", e.target.value)} required />
-            </div>
-            <div className="col-md-2">
-              <label className="form-label">Qty</label>
-              <input type="number" min="0" className="form-control" value={oform.qty} onChange={(e)=>setO("qty", e.target.value)} />
-            </div>
-            <div className="col-md-2">
-              <label className="form-label">Pickup start</label>
-              <input className="form-control" value={oform.pickupStart} onChange={(e)=>setO("pickupStart", e.target.value)} />
-            </div>
-            <div className="col-md-2">
-              <label className="form-label">Pickup end</label>
-              <input className="form-control" value={oform.pickupEnd} onChange={(e)=>setO("pickupEnd", e.target.value)} />
-            </div>
-            <div className="col-md-8">
-              <label className="form-label">Photo URL (optional)</label>
-              <input className="form-control" value={oform.photoUrl} onChange={(e)=>setO("photoUrl", e.target.value)} placeholder="Defaults to restaurant hero if empty" />
-            </div>
-            <div className="col-12">
-              <button className="btn btn-dark" disabled={busy}>{busy ? "Creating…" : "Create offer"}</button>
-            </div>
+          {!canCreateOffers && (
+            <div className="alert alert-warning py-2">Save your restaurant profile first to start listing offers.</div>
+          )}
+          <form onSubmit={createOffer}>
+            <fieldset disabled={!canCreateOffers} className="row g-3">
+              <div className="col-md-4">
+                <label className="form-label">Title</label>
+                <input className="form-control" value={oform.title} onChange={(e)=>setO("title", e.target.value)} required />
+              </div>
+              <div className="col-md-2">
+                <label className="form-label">Type</label>
+                <select className="form-select" value={oform.type} onChange={(e)=>setO("type", e.target.value)}>
+                  <option value="discount">discount</option>
+                  <option value="mystery">mystery</option>
+                  <option value="donation">donation</option>
+                </select>
+              </div>
+              <div className="col-md-2">
+                <label className="form-label">Price (A$)</label>
+                <input type="number" step="0.01" className="form-control" value={oform.price} onChange={(e)=>setO("price", e.target.value)} required />
+              </div>
+              <div className="col-md-2">
+                <label className="form-label">Original (A$)</label>
+                <input type="number" step="0.01" className="form-control" value={oform.originalPrice} onChange={(e)=>setO("originalPrice", e.target.value)} required />
+              </div>
+              <div className="col-md-2">
+                <label className="form-label">Qty</label>
+                <input type="number" min="0" className="form-control" value={oform.qty} onChange={(e)=>setO("qty", e.target.value)} />
+              </div>
+              <div className="col-md-2">
+                <label className="form-label">Pickup start</label>
+                <input className="form-control" value={oform.pickupStart} onChange={(e)=>setO("pickupStart", e.target.value)} />
+              </div>
+              <div className="col-md-2">
+                <label className="form-label">Pickup end</label>
+                <input className="form-control" value={oform.pickupEnd} onChange={(e)=>setO("pickupEnd", e.target.value)} />
+              </div>
+              <div className="col-md-8">
+                <label className="form-label">Photo URL (optional)</label>
+                <input className="form-control" value={oform.photoUrl} onChange={(e)=>setO("photoUrl", e.target.value)} placeholder="Defaults to restaurant hero if empty" />
+              </div>
+              <div className="col-12">
+                <button className="btn btn-dark" disabled={busy || !canCreateOffers}>{busy ? "Creating…" : "Create offer"}</button>
+              </div>
+            </fieldset>
           </form>
         </div>
       </div>

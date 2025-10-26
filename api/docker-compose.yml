@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: foodable
       POSTGRES_DB: foodable
     ports:
-      - "5435:5435"                # expose DB on host (optional)
+      - "5435:5432"                # expose DB on host (optional)
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { api } from "../lib/api";
 
 export default function OwnerLoginPage() {
   const [email, setEmail] = useState("");
@@ -12,16 +13,10 @@ export default function OwnerLoginPage() {
     e.preventDefault();
     setErr(""); setBusy(true);
     try {
-      const res = await fetch("http://localhost:4000/api/auth/owner/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ email, password }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) throw new Error(data.message || "Login failed");
+      const res = await api.post("/auth/owner/login", { email, password });
+      if (res.status < 200 || res.status >= 300) throw new Error("Login failed");
       navigate("/owner/portal", { replace: true });
-    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+    } catch (e) { setErr(e?.response?.data?.message || e.message || "Login failed"); } finally { setBusy(false); }
   }
 
   return (

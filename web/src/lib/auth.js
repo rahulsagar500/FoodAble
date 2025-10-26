@@ -12,20 +12,30 @@ export async function getMe() {
 }
 
 export function loginUrl() {
-  return "http://localhost:4000/api/auth/google";
+  return "/api/auth/google";
 }
 
 export async function logout() {
   await api.post("/auth/logout");
 }
 
-// ----- local (email/password) auth -----
-export async function registerLocal({ email, password, name, role }) {
-  const { data } = await api.post("/auth/register", { email, password, name, role });
-  return data; // user object, cookie is set by server
+// ----- email/password auth helpers aligned to monolith -----
+export async function registerCustomer({ email, password, name }) {
+  const { data } = await api.post("/auth/customer/register", { email, password, name });
+  return data;
 }
 
-export async function loginLocal({ email, password }) {
-  const { data } = await api.post("/auth/login", { email, password });
-  return data; // user object, cookie is set by server
+export async function loginCustomer({ email, password }) {
+  const { data } = await api.post("/auth/customer/login", { email, password });
+  return data;
+}
+
+export async function registerOwner({ email, password, name, restaurant }) {
+  const { data } = await api.post("/auth/owner/register", { email, password, name, restaurant });
+  return data;
+}
+
+export async function loginOwner({ email, password }) {
+  const { data } = await api.post("/auth/owner/login", { email, password });
+  return data;
 }

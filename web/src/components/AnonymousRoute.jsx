@@ -1,6 +1,7 @@
 // src/components/AnonymousRoute.jsx
 import React, { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
+import { api } from "../lib/api";
 
 /**
  * Renders children only when NOT authenticated.
@@ -13,8 +14,7 @@ export default function AnonymousRoute({ children, to = "/" }) {
     let alive = true;
     (async () => {
       try {
-        const res = await fetch("http://localhost:4000/api/auth/me", { credentials: "include" });
-        const data = await res.json();
+        const { data } = await api.get("/auth/me");
         if (!alive) return;
         setMe(data && data.id ? data : null);
       } catch {
