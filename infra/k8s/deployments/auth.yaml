@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth
+  namespace: foodable-dev
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: auth }
+  template:
+    metadata:
+      labels: { app: auth }
+    spec:
+      containers:
+        - name: app
+          image: asia-southeast1-docker.pkg.dev/tribal-cortex-443513-g5/foodable/auth:v1
+          imagePullPolicy: IfNotPresent
+          ports: [{ containerPort: 4001 }]
+          env:
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: app-secrets, key: DATABASE_URL } }
+            - name: JWT_SECRET
+              valueFrom: { secretKeyRef: { name: app-secrets, key: JWT_SECRET } }
+            - name: FRONTEND_ORIGIN
+              value: "http://localhost:5173"
+            - name: GOOGLE_CLIENT_ID
+              valueFrom: { secretKeyRef: { name: app-secrets, key: GOOGLE_CLIENT_ID, optional: true } }
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: app-secrets, key: GOOGLE_CLIENT_SECRET, optional: true } }
+            - name: GOOGLE_CALLBACK_URL
+              value: "http://localhost:4000/api/auth/google/callback"
+          readinessProbe:
+            httpGet: { path: /healthz, port: 4001 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 4001 }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits:   { cpu: "500m", memory: "512Mi" }
+        - name: cloud-sql-proxy
+          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.11.4
+          args: ["--port=5432", "$(CLOUDSQL_CONN)"]
+          env:
+            - name: CLOUDSQL_CONN
+              value: "tribal-cortex-443513-g5:asia-southeast1:foodable-sql"
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+
