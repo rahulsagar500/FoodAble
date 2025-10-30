@@ -1,16 +1,36 @@
-# React + Vite
+FoodAble Web
+============
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + Vite single‑page app with Bootstrap styling. Proxies `/api` to the backend gateway on `http://localhost:4000` in dev.
 
-Currently, two official plugins are available:
+Structure
+---------
+- src/pages: Restaurants, RestaurantDetails, OfferDetails, cart, SignIn, SignUp, Owner* pages
+- src/components: NavBar, Layout, AnonymousRoute, LoginPrompt
+- src/api: axios helpers for restaurants/offers
+- src/lib: api client, auth/session helpers, formatting utilities, useMe hook
+- src/cart: CartContext with localStorage persistence
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+Dev
+---
+cd web
+npm install
+npm run dev
 
-## React Compiler
+Config
+------
+- Vite dev proxy (`web/vite.config.js`) forwards `/api` → `http://localhost:4000`
+- Axios client (`src/lib/api.js`) uses base `/api` and `withCredentials: true` so the backend’s HTTP‑only cookie is sent.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+User Flows
+----------
+- Browse restaurants and offers, search/filter
+- View offer details; add to cart; reserve (requires login)
+- Customer auth: Google or email/password
+- Owner portal: create/update restaurant; create/update/delete offers
 
-## Expanding the ESLint configuration
+Notes
+-----
+- Backend routes are documented in `api/README.md` and served via the Nginx gateway.
+- The UI depends on the `/api/auth/me` session endpoint and JWT cookie set by the auth service.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
